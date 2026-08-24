@@ -5,6 +5,8 @@
  * @Project       : CodexRelay
  * @Description   : Codex API 中转热切换桌面工具
  * @File          : config.json 当前格式读写
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package config
 
@@ -66,6 +68,19 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Doge.SyncIntervalMinutes == 0 {
 		cfg.Doge.SyncIntervalMinutes = DefaultDogeSyncIntervalMinutes
 	}
+	if cfg.TokenSwitch.Mode == "" {
+		cfg.TokenSwitch = DefaultTokenSwitchSettings()
+	} else {
+		if cfg.TokenSwitch.AuthFailureThreshold == 0 {
+			cfg.TokenSwitch.AuthFailureThreshold = DefaultAuthFailureThreshold
+		}
+		if cfg.TokenSwitch.UpstreamFailureThreshold == 0 {
+			cfg.TokenSwitch.UpstreamFailureThreshold = DefaultUpstreamFailureThreshold
+		}
+		if cfg.TokenSwitch.UpstreamFailureWindowMinutes == 0 {
+			cfg.TokenSwitch.UpstreamFailureWindowMinutes = DefaultUpstreamFailureWindowMinutes
+		}
+	}
 	if cfg.Doge.Groups == nil {
 		cfg.Doge.Groups = []string{}
 	}
@@ -81,6 +96,20 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Doge.Notifications.DismissedAlertKeys == nil {
 		cfg.Doge.Notifications.DismissedAlertKeys = []string{}
 	}
+	if cfg.Doge.Notifications.BalanceAlertRecords == nil {
+		cfg.Doge.Notifications.BalanceAlertRecords = []DogeBalanceAlertRecord{}
+	}
+	if cfg.Doge.Notifications.SubscriptionAlertRecords == nil {
+		cfg.Doge.Notifications.SubscriptionAlertRecords = []DogeSubscriptionAlertRecord{}
+	}
+	if cfg.Doge.Notifications.BalanceAlertThresholdUSD <= 0 {
+		cfg.Doge.Notifications.BalanceAlertEnabled = true
+		cfg.Doge.Notifications.BalanceAlertThresholdUSD = DefaultQuotaAlertThresholdUSD
+	}
+	if cfg.Doge.Notifications.SubscriptionAlertThresholdUSD <= 0 {
+		cfg.Doge.Notifications.SubscriptionAlertEnabled = true
+		cfg.Doge.Notifications.SubscriptionAlertThresholdUSD = DefaultQuotaAlertThresholdUSD
+	}
 	if cfg.ClientConfigs == nil {
 		cfg.ClientConfigs = map[string]ClientConfig{}
 	}
@@ -90,6 +119,7 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Preferences.RestoreViewMode == "" {
 		cfg.Preferences.RestoreViewMode = RestoreViewCurrent
 	}
+	cfg.FailoverOrder = NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 	if err := Validate(cfg); err != nil {
 		return AppConfig{}, err
 	}

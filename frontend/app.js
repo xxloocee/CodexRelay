@@ -25,7 +25,7 @@ import {
   OpenDogeTopup,
   MarkDogeAnnouncementsRead,
   ReorderDogeTokens,
-  ReorderProfiles,
+  ReorderFailoverProfiles,
   RedeemDoge,
   SaveProfile,
   SelectDirectory,
@@ -35,14 +35,18 @@ import {
   SetClientConfigSkip,
   SetNetwork,
   SetDogeSyncInterval,
+  SetTokenSwitchSettings,
+  SetDogeAlertSettings,
   SetProxyPort,
   SetPreferences,
+  SetProfileAutoSwitch,
   TestProfile,
   FetchProfileModels,
   SyncDoge,
   UnbindDoge,
 } from "./api.js";
 import { renderAnnouncementMarkdown } from "./announcement-markdown.js";
+import { registerExternalLinkHandler } from "./external-links.js";
 import * as wails from "/wails/runtime.js";
 
 const app = {
@@ -59,6 +63,7 @@ const app = {
   viewFilterInitialized: false,
   draggingSortKey: null,
   toastTimer: null,
+  toastCleanupTimer: null,
   dogeSyncPollTimer: null,
   dogeRemoteSyncing: false,
   dogeCategoryDialogSignature: "",
@@ -89,6 +94,8 @@ const app = {
 const categoryOptions = ["codex", "claude", "gemini", "grok", "opencode", "openclaw", "hermes", "image", "other"];
 
 const $ = (id) => document.getElementById(id);
+
+registerExternalLinkHandler((error) => toast(errorMessage(error), true));
 
 function visibleCategorySet() {
   const configured = app.state?.preferences?.visibleCategories;
@@ -171,7 +178,6 @@ async function loadState() {
     renderRequests();
     renderAnnouncements();
     renderOnboarding();
-    openDogeCategoryDialog();
     renderDogeSyncToast();
     if (!app.updateCheckStarted && app.state.updateSupported) {
       app.updateCheckStarted = true;
@@ -189,7 +195,18 @@ function renderShell() {
   const visibleCategories = visibleCategorySet();
   const activeCategories = new Set((app.state.profiles || []).filter((profile) => profile.active && visibleCategories.has(profile.category)).map((profile) => profile.category));
   $("activeCount").textContent = `${activeCategories.size}/${visibleCategories.size}`;
+  const failoverMode = app.state.tokenSwitch?.mode === "auto" ? "模式：自动切换" : "模式：手动提示";
+  const failoverStatus = $("failoverStatus");
+  failoverStatus.textContent = failoverMode;
+  failoverStatus.classList.toggle("manual", app.state.tokenSwitch?.mode !== "auto");
+  renderPendingDogeImport();
   renderDogeQuota();
+}
+
+function renderPendingDogeImport() {
+  const count = pendingDogeTokens().length;
+  $("pendingDogeImport").classList.toggle("hidden", count === 0);
+  $("pendingDogeImportCount").textContent = String(count);
 }
 
 function renderUpdateStatus() {
@@ -321,7 +338,9 @@ function showDogeSyncToast(phase = "base") {
   node.replaceChildren(icon("load", "spin"), Object.assign(document.createElement("span"), { textContent: message }));
   node.className = "toast show";
   clearTimeout(app.toastTimer);
+  clearTimeout(app.toastCleanupTimer);
   app.toastTimer = null;
+  app.toastCleanupTimer = null;
 }
 
 function renderDogeSyncToast() {
@@ -638,6 +657,7 @@ async function bindOnboarding() {
     await BindDoge(token);
     input.value = "";
     await loadState();
+    openDogeCategoryDialog(true);
     toast("二狗子已验证并绑定");
   } catch (error) {
     errorNode.textContent = errorMessage(error);
@@ -700,59 +720,87 @@ async function openDogePurchase() {
   }
 }
 
+function orderedProfiles() {
+  const byID = new Map((app.state?.profiles || []).map((profile) => [profile.id, profile]));
+  const ordered = [];
+  const seen = new Set();
+  for (const category of categoryOptions) {
+    const ids = app.state?.failoverOrder?.[category] || [];
+    for (const id of ids) {
+      const profile = byID.get(id);
+      if (profile && profile.category === category && !seen.has(id)) {
+        ordered.push(profile);
+        seen.add(id);
+      }
+    }
+  }
+  for (const profile of app.state?.profiles || []) {
+    if (!seen.has(profile.id)) ordered.push(profile);
+  }
+  return ordered;
+}
+
+function renderProfileRow(profile, list) {
+  const row = document.createElement("article");
+  row.className = "profile-row" + (profile.active ? " active" : "");
+  row.dataset.profileId = profile.id;
+  row.dataset.category = profile.category;
+  row.dataset.sortKind = `failover-${profile.category}`;
+
+  const dragHandle = createDragHandle();
+  const mark = document.createElement("span");
+  mark.className = "provider-mark";
+  mark.textContent = providerInitial(profile.name);
+  const tags = [];
+  if (!app.sourceFilter) tags.push({ text: sourceLabel(profile.source), tone: "source" });
+  if (!app.categoryFilter) tags.push({ text: categoryLabel(profile.category), tone: "category" });
+  const info = createProfileInfo({ name: profile.name, tags, note: profile.note, active: profile.active });
+  const actions = buildProfileActions({
+    active: profile.active,
+    onSwitch: (event) => activateProfile(profile.id, event.currentTarget),
+    onTest: (event) => testProfile(profile.id, event.currentTarget),
+    autoSwitchEnabled: !profile.skipAutoSwitch,
+    onAutoSwitch: (event) => setProfileAutoSwitch(profile.id, profile.skipAutoSwitch, event.currentTarget),
+    onEdit: () => openEditor(profile.id),
+    onDelete: (event) => deleteProfile(profile.id, event.currentTarget),
+  });
+  row.append(dragHandle, mark, info, actions);
+  installSortableDrag(row, dragHandle, { sortKind: `failover-${profile.category}`, keyAttribute: "profileId", persistOrder: () => persistFailoverOrder(profile.category) });
+  list.appendChild(row);
+}
+
 function renderProfiles() {
   if (app.draggingSortKey) return;
   if (app.categoryFilter && !isCategoryVisible(app.categoryFilter)) app.categoryFilter = "";
   const list = $("profileList");
   list.replaceChildren();
-  const allProfiles = app.state.profiles || [];
-  const profiles = allProfiles.filter((profile) => profile.source !== "doge" && profileMatchesFilters(profile));
+  const allProfiles = orderedProfiles();
+  const dogeTokens = app.state?.doge?.tokens || [];
+  const dogeByProfileID = new Map(dogeTokens.filter((token) => token.profileId).map((token) => [token.profileId, token]));
+  const profiles = allProfiles.filter((profile) => profileMatchesFilters(profile));
   renderFilterButtons();
+  for (const profile of profiles) {
+    if (profile.source === "doge") {
+      // 二狗子 Profile 必须以最新目录实体为准；缺失项不得退回普通可切换行。
+      const token = dogeByProfileID.get(profile.id);
+      if (token) renderDogeToken(token, list, { sortable: true });
+    } else {
+      renderProfileRow(profile, list);
+    }
+  }
   const dogeSelected = app.sourceFilter === "doge";
   const dogeVisible = !app.sourceFilter || dogeSelected;
-  const dogeTokens = dogeVisible
-    ? (app.state.doge?.tokens || []).filter((token) => (!token.category || isCategoryVisible(token.category)) && (!app.categoryFilter || token.category === app.categoryFilter))
-    : [];
   const dogeSyncing = dogeVisible && Boolean(app.state.doge?.bound) && isDogeSyncing();
   const dogeSyncError = dogeVisible && Boolean(app.state.doge?.bound) && Boolean(app.state.doge?.lastSyncError);
   const dogeFailedBeforeData = dogeSyncError && !app.state.doge?.lastSyncAt && !dogeSyncing;
-  const hasRows = profiles.length > 0 || dogeTokens.length > 0;
+  const hasRows = profiles.length > 0;
   $("emptyProfiles").classList.toggle("hidden", hasRows);
   $("emptyProfilesTitle").textContent = dogeSyncing ? "二狗子 API 同步中..." : (dogeFailedBeforeData ? "二狗子 API 同步失败，请重试" : (dogeSelected ? (app.state.doge?.bound ? "二狗子暂无令牌" : "请在设置中绑定二狗子") : "还没有代理 API"));
   $("emptyAdd").classList.toggle("hidden", dogeSelected);
-  for (const profile of profiles) {
-    const row = document.createElement("article");
-    row.className = "profile-row" + (profile.active ? " active" : "");
-    row.dataset.profileId = profile.id;
-    row.dataset.sortKind = "profile";
-
-    const dragHandle = createDragHandle();
-
-    const mark = document.createElement("span");
-    mark.className = "provider-mark";
-    mark.textContent = providerInitial(profile.name);
-
-    const tags = [];
-    if (!app.sourceFilter) tags.push({ text: sourceLabel(profile.source), tone: "source" });
-    if (!app.categoryFilter) tags.push({ text: categoryLabel(profile.category), tone: "category" });
-    const info = createProfileInfo({ name: profile.name, tags, note: profile.note, active: profile.active });
-
-    const actions = buildProfileActions({
-      active: profile.active,
-      onSwitch: (event) => activateProfile(profile.id, event.currentTarget),
-      onTest: (event) => testProfile(profile.id, event.currentTarget),
-      onEdit: () => openEditor(profile.id),
-      onDelete: (event) => deleteProfile(profile.id, event.currentTarget),
-    });
-    row.append(dragHandle, mark, info, actions);
-    installSortableDrag(row, dragHandle, { sortKind: "profile", keyAttribute: "profileId", persistOrder: persistProfileOrder });
-    list.appendChild(row);
-  }
-  for (const token of dogeTokens) renderDogeToken(token, list);
 }
 
 function pendingDogeTokens() {
-  return (app.state?.doge?.tokens || []).filter((token) => token.needsCategory || !token.category);
+  return (app.state?.doge?.tokens || []).filter((token) => !token.profileId && !token.imported);
 }
 
 function openDogeCategoryDialog(force = false) {
@@ -777,17 +825,18 @@ function openDogeCategoryDialog(force = false) {
     const info = document.createElement("div");
     info.className = "doge-category-info";
     const name = document.createElement("strong");
-    name.textContent = token.name || `令牌 ${token.id}`;
+    name.textContent = nonHomeDogeTokenName(token);
     const detail = document.createElement("small");
-    detail.textContent = `${token.maskedKey || "未返回密钥"} · ${token.groupDisplayName || "未分组"}${token.groupRatio > 0 ? ` · 倍率：${formatDogeRatio(token.groupRatio)}` : ""}`;
+    detail.textContent = token.maskedKey || "未返回密钥";
     info.append(name, detail);
     const select = document.createElement("select");
     select.className = "sync-select doge-category-select";
     select.dataset.tokenId = String(token.id);
-    select.setAttribute("aria-label", `${token.name || "令牌"}存放分组`);
+    select.setAttribute("aria-label", `${nonHomeDogeTokenName(token)}存放分组`);
     select.appendChild(new Option("选择分组", ""));
     for (const category of categoryOptions) select.appendChild(new Option(categoryLabel(category), category));
     if (selectedValues.has(select.dataset.tokenId)) select.value = selectedValues.get(select.dataset.tokenId);
+    else if (categoryOptions.includes(token.category)) select.value = token.category;
     row.append(info, select);
     rows.appendChild(row);
   }
@@ -824,13 +873,17 @@ async function saveDogeCategoryAssignments() {
   }
 }
 
-function renderDogeToken(token, list) {
+function renderDogeToken(token, list, { sortable = false } = {}) {
   const row = document.createElement("article");
   const unavailable = token.permitted === false;
   const localProfile = findLocalDogeProfile(token);
   const imported = Boolean(localProfile);
+  // 目录可用状态只限制切换按钮；已导入 Profile 始终保留在故障顺序中，并继续支持鼠标和键盘排序。
+  const sortableInFailoverOrder = sortable && imported;
   row.className = "profile-row doge-token-row" + (token.active ? " active" : "") + (token.needsCategory ? " unassigned" : "") + (unavailable ? " unavailable" : "") + (token.active && unavailable ? " active-unavailable" : "");
-  row.dataset.sortKind = "doge";
+  row.dataset.profileId = localProfile?.id || "";
+  row.dataset.category = localProfile?.category || token.category || "";
+  row.dataset.sortKind = sortableInFailoverOrder ? `failover-${row.dataset.category}` : "doge";
   row.dataset.dogeOrderKey = token.orderKey || String(token.id);
   const dragHandle = createDragHandle();
   const mark = document.createElement("img");
@@ -851,13 +904,19 @@ function renderDogeToken(token, list) {
       ? (event) => activateProfile(localProfile.id, event.currentTarget)
       : (event) => enableDogeToken(token, event.currentTarget),
     onTest: (event) => testDogeToken(token, event.currentTarget),
+    autoSwitchEnabled: !localProfile?.skipAutoSwitch,
+    onAutoSwitch: imported ? (event) => setProfileAutoSwitch(localProfile.id, localProfile.skipAutoSwitch, event.currentTarget) : null,
     onEdit: imported ? () => openEditor(localProfile.id) : token.needsCategory ? () => openDogeCategoryDialog(true) : (event) => editDogeToken(token, event.currentTarget),
     editTitle: imported ? "编辑代理 API" : "选择存放分组",
     onDelete: imported ? (event) => deleteProfile(localProfile.id, event.currentTarget) : null,
     deleteDisabled: !imported,
   });
   row.append(dragHandle, mark, info, actions);
-  installSortableDrag(row, dragHandle, { sortKind: "doge", keyAttribute: "dogeOrderKey", persistOrder: persistDogeTokenOrder });
+  if (sortableInFailoverOrder) {
+    installSortableDrag(row, dragHandle, { sortKind: `failover-${row.dataset.category}`, keyAttribute: "profileId", persistOrder: () => persistFailoverOrder(row.dataset.category) });
+  } else {
+    installSortableDrag(row, dragHandle, { sortKind: "doge", keyAttribute: "dogeOrderKey", persistOrder: persistDogeTokenOrder });
+  }
   list.appendChild(row);
 }
 
@@ -1091,6 +1150,29 @@ function formatDogeRatio(value) {
   return Number.isFinite(ratio) ? String(ratio) : "-";
 }
 
+function formatNonHomeDogeName(name, group, ratio) {
+  const cleanName = String(name || "未命名令牌").trim() || "未命名令牌";
+  const cleanGroup = String(group || "").trim();
+  if (!cleanGroup) return cleanName;
+  const numericRatio = Number(ratio);
+  return numericRatio > 0
+    ? `${cleanName} (${cleanGroup}·${formatDogeRatio(numericRatio)})`
+    : `${cleanName} (${cleanGroup})`;
+}
+
+function nonHomeDogeTokenName(token) {
+  return formatNonHomeDogeName(token?.name || `令牌 ${token?.id || ""}`, token?.groupDisplayName, token?.groupRatio);
+}
+
+// 主界面以名称、分组和倍率分开显示；其他页面统一使用完整令牌名称。
+function nonHomeProfileName(profile) {
+  const name = String(profile?.name || "代理 API").trim();
+  if (profile?.source === "custom") return `${name}（自定义 API）`;
+  if (profile?.source !== "doge") return name;
+  const token = (app.state?.doge?.tokens || []).find((item) => Number(item.id) === Number(profile.remoteTokenId));
+  return formatNonHomeDogeName(name, token?.groupDisplayName, token?.groupRatio);
+}
+
 function profileMatchesFilters(profile) {
   return isCategoryVisible(profile.category) &&
     (!app.sourceFilter || profile.source === app.sourceFilter) &&
@@ -1204,16 +1286,20 @@ function moveSortableRow(list, dragged, target, insertAfter) {
   }
 }
 
-async function persistProfileOrder() {
-  const ids = Array.from($("profileList").children).filter((row) => row.dataset.sortKind === "profile").map((row) => row.dataset.profileId);
-  const previous = app.state.profiles.map((profile) => profile.id);
+async function persistFailoverOrder(category) {
+  const sortKind = `failover-${category}`;
+  const ids = Array.from($("profileList").children).filter((row) => row.dataset.sortKind === sortKind).map((row) => row.dataset.profileId).filter(Boolean);
+  if (!ids.length) return;
+  const current = [...(app.state.failoverOrder?.[category] || [])];
   const visible = new Set(ids);
-  const reorderedVisible = ids.map((id) => app.state.profiles.find((profile) => profile.id === id));
-  const nextProfiles = app.state.profiles.map((profile) => visible.has(profile.id) ? reorderedVisible.shift() : profile);
-  const nextIds = nextProfiles.map((profile) => profile.id);
-  if (nextIds.every((id, index) => id === previous[index])) return;
-  app.state.profiles = nextProfiles;
-  await persistOrder(() => ReorderProfiles(nextIds), "代理 API 排序已更新");
+  const next = current.slice();
+  let cursor = 0;
+  for (let index = 0; index < next.length; index += 1) {
+    if (visible.has(next[index])) next[index] = ids[cursor++];
+  }
+  while (cursor < ids.length) next.push(ids[cursor++]);
+  if (next.every((id, index) => id === current[index]) && next.length === current.length) return;
+  await persistOrder(() => ReorderFailoverProfiles(category, next), "令牌切换顺序已更新");
 }
 
 async function persistDogeTokenOrder() {
@@ -1240,16 +1326,45 @@ function icon(name, extraClass = "") {
   return node;
 }
 
-function buildProfileActions({ active, switchDisabled = false, onSwitch, onTest, onEdit, onDelete, editTitle = "编辑代理 API", deleteDisabled = false }) {
+function buildProfileActions({ active, switchDisabled = false, onSwitch, onTest, autoSwitchEnabled = true, onAutoSwitch, onEdit, onDelete, editTitle = "编辑代理 API", deleteDisabled = false }) {
   const actions = document.createElement("div");
   actions.className = "profile-actions";
-  actions.append(
+  const buttons = [
     actionButton(active ? "当前" : "切换", active ? "use-button current" : "use-button", "切换当前代理 API", active ? "check" : "play", onSwitch, active || switchDisabled),
-    actionButton("", "row-icon-button", "测试代理 API", "activity", onTest),
+    actionButton("", "row-icon-button", "测试令牌 API", "activity", onTest),
     actionButton("", "row-icon-button", editTitle, "edit", onEdit),
     actionButton("", "row-icon-button danger", "删除本地代理 API", "trash-2", onDelete, deleteDisabled),
-  );
+  ];
+  if (app.state?.tokenSwitch?.mode === "auto" && onAutoSwitch) buttons.splice(2, 0, autoSwitchButton(autoSwitchEnabled, onAutoSwitch));
+  actions.append(...buttons);
   return actions;
+}
+
+function autoSwitchButton(enabled, handler) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "row-icon-button";
+  button.title = enabled ? "参与自动切换，点击后跳过此令牌" : "已跳过此令牌，点击后恢复自动切换";
+  button.setAttribute("aria-label", button.title);
+  const image = document.createElement("img");
+  image.className = "profile-auto-switch-icon";
+  image.src = enabled ? "/icons/auto.svg" : "/icons/skip.svg";
+  image.alt = "";
+  button.appendChild(image);
+  button.addEventListener("click", handler);
+  return button;
+}
+
+async function setProfileAutoSwitch(id, currentlySkipped, button) {
+  setButtonLoading(button, true);
+  try {
+    await SetProfileAutoSwitch(id, currentlySkipped);
+    await loadState();
+    toast(currentlySkipped ? "已恢复参与自动切换" : "自动切换将跳过此令牌");
+  } catch (error) {
+    toast(errorMessage(error), true);
+    setButtonLoading(button, false);
+  }
 }
 
 function actionButton(label, className, title, iconName, handler, disabled = false) {
@@ -1554,7 +1669,7 @@ async function testProfile(id, button = null) {
 
 async function deleteProfile(id, button = null) {
   const profile = app.state.profiles.find((item) => item.id === id);
-  if (!profile || !(await showConfirmDialog("确定删除“" + profile.name + "”吗？", { title: "删除代理 API", danger: true }))) return;
+  if (!profile || !(await showConfirmDialog("确定删除“" + nonHomeProfileName(profile) + "”吗？", { title: "删除代理 API", danger: true }))) return;
   setButtonLoading(button, true, "删除中...");
   try {
     await DeleteProfile(id);
@@ -1682,6 +1797,8 @@ function renderPreferences() {
   $("closeToTray").checked = preferences.closeToTray;
   $("launchAtStartup").checked = preferences.launchAtStartup;
   $("startHidden").checked = preferences.startHidden;
+  renderTokenSwitchSettings();
+  renderDogeAlertSettings();
   const visible = visibleCategorySet();
   // 保存开关后会重新读取状态并重建列表，重建前后保持内容滚动位置，避免浏览器滚动锚点跳动。
   const settingsContent = $("settingsContent");
@@ -1690,27 +1807,86 @@ function renderPreferences() {
   visibleRows.replaceChildren();
   for (const category of categoryOptions) {
     const row = document.createElement("label");
-    row.className = "setting-row category-visibility-row";
-    const copy = document.createElement("span");
-    const title = document.createElement("strong");
-    title.textContent = categoryLabel(category);
-    const description = document.createElement("small");
-    description.textContent = "在主页类别筛选和列表中显示";
-    copy.append(title, description);
+    row.className = "compact-check-option category-visibility-option";
     const input = document.createElement("input");
-    input.className = "switch-input";
     input.type = "checkbox";
     input.checked = visible.has(category);
     input.dataset.category = category;
     input.setAttribute("aria-label", `显示${categoryLabel(category)}类别`);
     input.addEventListener("change", savePreferences);
-    row.append(copy, input);
+    const title = document.createElement("span");
+    title.textContent = categoryLabel(category);
+    row.append(input, title);
     visibleRows.appendChild(row);
   }
   $("defaultSource").value = preferences.defaultSource || "";
   $("defaultCategory").value = preferences.defaultCategory || "";
   $("restoreViewMode").value = preferences.restoreViewMode || "current";
   if (settingsContent) settingsContent.scrollTop = scrollTop;
+}
+
+function renderTokenSwitchSettings() {
+  const settings = app.state?.tokenSwitch || {};
+  document.querySelectorAll("#tokenSwitchMode button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.mode === (settings.mode || "prompt"));
+  });
+  for (const id of ["trigger401", "trigger403", "trigger5xx", "triggerNetwork", "triggerDirectoryInvalid", "triggerDirectoryMissing"]) {
+    $(id).checked = Boolean(settings[id]);
+  }
+  $("failoverLoop").checked = Boolean(settings.loop);
+  $("authFailureThreshold").value = String(settings.authFailureThreshold || 5);
+  $("upstreamFailureThreshold").value = String(settings.upstreamFailureThreshold || 5);
+  $("upstreamFailureWindowMinutes").value = String(settings.upstreamFailureWindowMinutes || 3);
+}
+
+function renderDogeAlertSettings() {
+  const doge = app.state?.doge || {};
+  $("balanceAlertEnabled").checked = doge.balanceAlertEnabled !== false;
+  $("subscriptionAlertEnabled").checked = doge.subscriptionAlertEnabled !== false;
+  $("balanceAlertThresholdUSD").value = Number(doge.balanceAlertThresholdUsd || 1).toFixed(2);
+  $("subscriptionAlertThresholdUSD").value = Number(doge.subscriptionAlertThresholdUsd || 1).toFixed(2);
+}
+
+async function saveTokenSwitchSettings() {
+  const mode = document.querySelector("#tokenSwitchMode button.active")?.dataset.mode || "prompt";
+  const payload = {
+    mode,
+    trigger401: $("trigger401").checked,
+    trigger403: $("trigger403").checked,
+    trigger5xx: $("trigger5xx").checked,
+    triggerNetwork: $("triggerNetwork").checked,
+    triggerDirectoryInvalid: $("triggerDirectoryInvalid").checked,
+    triggerDirectoryMissing: $("triggerDirectoryMissing").checked,
+    authFailureThreshold: Number($("authFailureThreshold").value),
+    upstreamFailureThreshold: Number($("upstreamFailureThreshold").value),
+    upstreamFailureWindowMinutes: Number($("upstreamFailureWindowMinutes").value),
+    loop: $("failoverLoop").checked,
+  };
+  try {
+    await SetTokenSwitchSettings(payload);
+    await loadState();
+    toast("令牌异常处理设置已保存");
+  } catch (error) {
+    await loadState();
+    toast(errorMessage(error), true);
+  }
+}
+
+async function saveDogeAlertSettings() {
+  const payload = {
+    balanceEnabled: $("balanceAlertEnabled").checked,
+    balanceThresholdUsd: Number($("balanceAlertThresholdUSD").value),
+    subscriptionEnabled: $("subscriptionAlertEnabled").checked,
+    subscriptionThresholdUsd: Number($("subscriptionAlertThresholdUSD").value),
+  };
+  try {
+    await SetDogeAlertSettings(payload);
+    await loadState();
+    toast("余额和套餐提醒设置已保存");
+  } catch (error) {
+    await loadState();
+    toast(errorMessage(error), true);
+  }
 }
 
 async function savePreferences() {
@@ -1856,7 +2032,7 @@ function renderRequests() {
     const reported = request.usageStatus === "reported";
     row.append(
       cell(formatRequestTime(request.startedAt)),
-      cell(request.profile || "-"),
+      cell(nonHomeProfileName((app.state.profiles || []).find((profile) => profile.id === request.profileId) || { name: request.profile || "-" })),
       cell(request.model || "-"),
       cell(request.method + " " + request.path, "path"),
       cell(reported ? formatTokens(request.inputTokens) : "-", "token-value"),
@@ -1872,7 +2048,7 @@ function renderRequests() {
 
 function renderUsageProfileOptions() {
   const select = $("usageProfile");
-  const names = new Map((app.state.profiles || []).map((profile) => [profile.id, profile.name]));
+  const names = new Map((app.state.profiles || []).map((profile) => [profile.id, nonHomeProfileName(profile)]));
   for (const request of app.state.requests || []) {
     if (request.profileId && !names.has(request.profileId)) names.set(request.profileId, request.profile || "已删除中转站");
   }
@@ -1989,10 +2165,19 @@ async function copyText(text) {
 
 function toast(message, isError = false) {
   const node = $("toast");
+  clearTimeout(app.toastTimer);
+  clearTimeout(app.toastCleanupTimer);
   node.replaceChildren(Object.assign(document.createElement("span"), { textContent: message }));
   node.className = "toast show" + (isError ? " error" : "");
-  clearTimeout(app.toastTimer);
-  app.toastTimer = setTimeout(() => { node.className = "toast"; }, 3000);
+  app.toastTimer = setTimeout(() => {
+    app.toastTimer = null;
+    // 淡出期间保留当前提示类型，避免错误提示在透明度过渡时短暂恢复成默认绿色。
+    node.classList.remove("show");
+    app.toastCleanupTimer = setTimeout(() => {
+      app.toastCleanupTimer = null;
+      if (!node.classList.contains("show")) node.className = "toast";
+    }, 200);
+  }, 3000);
 }
 
 function setDogeQuotaPopover(open) {
@@ -2035,9 +2220,11 @@ $("refreshDoge").addEventListener("click", async () => {
   showDogeSyncToast("base");
   startDogeSyncProgressPolling();
   renderShell(); renderProfiles(); renderConnection(); renderAnnouncements();
+  let synced = false;
   try {
     app.dogeCategoryDialogSignature = "";
     await SyncDoge();
+    synced = true;
     toast("数据同步完成");
   } catch (error) {
     toast(errorMessage(error), true);
@@ -2046,11 +2233,13 @@ $("refreshDoge").addEventListener("click", async () => {
     stopDogeSyncProgressPolling();
     app.dogeRemoteSyncing = false;
     await loadState();
+    if (synced) openDogeCategoryDialog(true);
     setButtonLoading(button, false);
   }
 });
 document.querySelectorAll(".filter-option").forEach((button) => button.addEventListener("click", () => setFilter(button.closest(".filter-options").dataset.filterGroup, button.dataset.filterValue)));
 $("openSettings").addEventListener("click", () => openSettings());
+$("pendingDogeImport").addEventListener("click", () => openDogeCategoryDialog(true));
 $("settingsBack").addEventListener("click", () => showView("profiles"));
 $("updateAction").addEventListener("click", () => app.update.available ? runWindowsUpdate() : checkForUpdates(true));
 $("chooseDataDirectory").addEventListener("click", async (event) => {
@@ -2092,6 +2281,12 @@ document.querySelectorAll("#usageRanges button").forEach((button) => button.addE
 $("usageProfile").addEventListener("change", () => { app.usageProfile = $("usageProfile").value; renderRequests(); });
 $("clearUsage").addEventListener("click", clearUsage);
 for (const id of ["closeToTray", "launchAtStartup", "startHidden", "defaultSource", "defaultCategory", "restoreViewMode"]) $(id).addEventListener("change", savePreferences);
+document.querySelectorAll("#tokenSwitchMode button").forEach((button) => button.addEventListener("click", async () => {
+  document.querySelectorAll("#tokenSwitchMode button").forEach((item) => item.classList.toggle("active", item === button));
+  await saveTokenSwitchSettings();
+}));
+for (const id of ["failoverLoop", "trigger401", "trigger403", "trigger5xx", "triggerNetwork", "triggerDirectoryInvalid", "triggerDirectoryMissing", "authFailureThreshold", "upstreamFailureThreshold", "upstreamFailureWindowMinutes"]) $(id).addEventListener("change", saveTokenSwitchSettings);
+for (const id of ["balanceAlertEnabled", "balanceAlertThresholdUSD", "subscriptionAlertEnabled", "subscriptionAlertThresholdUSD"]) $(id).addEventListener("change", saveDogeAlertSettings);
 document.querySelectorAll("#networkModes button").forEach((button) => button.addEventListener("click", () => setNetworkMode(button.dataset.mode)));
 $("saveNetwork").addEventListener("click", () => saveNetwork());
 $("saveProxyPort").addEventListener("click", saveProxyPort);
@@ -2099,6 +2294,7 @@ $("dogeConnectionAction").addEventListener("click", async () => {
   const doge = app.state?.doge || {};
   const button = $("dogeConnectionAction");
   const binding = !doge.bound;
+  let bound = false;
   if (doge.bound && !(await showConfirmDialog("解除绑定会清除本地二狗子目录，确定继续吗？", { title: "解除二狗子绑定", danger: true }))) return;
   if (binding) {
     app.localDogeSyncing = true;
@@ -2115,6 +2311,7 @@ $("dogeConnectionAction").addEventListener("click", async () => {
       toast("二狗子已解除绑定");
     } else {
       await BindDoge($("dogeAccessToken").value);
+      bound = true;
       toast("二狗子已验证并绑定");
     }
   } catch (error) {
@@ -2125,6 +2322,7 @@ $("dogeConnectionAction").addEventListener("click", async () => {
       stopDogeSyncProgressPolling();
       app.dogeRemoteSyncing = false;
       await loadState();
+      if (bound) openDogeCategoryDialog(true);
     }
     setButtonLoading(button, false);
     renderConnection();

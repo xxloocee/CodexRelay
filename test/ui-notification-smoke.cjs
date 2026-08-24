@@ -34,7 +34,8 @@ const state = {
   requests: [],
   usage: { updatedAt: "", total: {}, profiles: {}, days: {} },
   uptimeSeconds: 1,
-  preferences: { closeToTray: true, launchAtStartup: false, startHidden: false, defaultSource: "doge", defaultCategory: "codex", restoreViewMode: "current" },
+  tokenSwitch: { mode: "prompt", loop: true, trigger401: true, trigger403: true, trigger5xx: true, triggerNetwork: true, triggerDirectoryInvalid: true, triggerDirectoryMissing: true, authFailureThreshold: 5, upstreamFailureThreshold: 5, upstreamFailureWindowMinutes: 3 },
+  preferences: { closeToTray: true, launchAtStartup: false, startHidden: false, defaultSource: "", defaultCategory: "codex", restoreViewMode: "current" },
   doge: {
     bound: false,
     walletUsd: 0,
@@ -60,6 +61,7 @@ const state = {
     syncIntervalMinutes: 3,
     lastSyncAt: "",
     lastSyncError: "",
+    tokenSwitches: {},
   },
 };
 state.doge.notifications.alerts = [{ kind: "announcement", key: "announcement:11", title: "新的系统公告", message: "平台发布了新的公告", announcementId: 11 }];
@@ -72,7 +74,7 @@ const server = http.createServer((request, response) => {
   let requestPath = decodeURIComponent((request.url || "/").split("?")[0]);
   if (requestPath === "/wails/runtime.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" });
-  response.end(`export const CancellablePromise = Promise; export const Create = { Any: x => x, Array: f => xs => (xs || []).map(f), Map: () => x => ({}), Nullable: f => x => x == null ? null : f(x), }; export const Events = { On: (name, callback) => { globalThis.__wailsEvents = globalThis.__wailsEvents || {}; globalThis.__wailsEvents[name] = callback; }, }; const wait = ms => new Promise(resolve => setTimeout(resolve, ms)); export const Call = { ByID: async (id, ...args) => { if (id === 3062805628) return globalThis.__relayState; if (id === 1536866851 || id === 2451788025 || id === 1654359792) { await wait(450); return; } if (id === 215903019) { globalThis.__relayState.doge.notifications.unreadCount = 0; return; } if (id === 93543395) { globalThis.__relayState.doge.tokenSwitch = null; return; } if (id === 3647092161) { globalThis.__relayState.doge.tokenSwitch = null; return; } if (id === 3707202435) { globalThis.__relayState.needsOnboarding = false; return; } if (id === 1746439210) { globalThis.__relayState.proxyPort = args[0]; return; } if (id === 3841417432) { globalThis.__relayState.doge.syncIntervalMinutes = args[0]; return; } if (id === 1477342492) return (args[0] || "C:\\\\Users\\\\Ricky-Desktop\\\\.CodexRelay") + "\\\\picked"; if (id === 2510123141) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.configDir = args[1]; return; } if (id === 2542801733) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.skipConfigReplacement = args[1]; return; } if (id === 3032635246) { globalThis.__relayState.dataDirectory = args[0]; return; } return; } };`);
+  response.end(`export const CancellablePromise = Promise; export const Create = { Any: x => x, Array: f => xs => (xs || []).map(f), Map: (keyFn, valueFn) => x => Object.fromEntries(Object.entries(x || {}).map(([key, value]) => [keyFn(key), valueFn(value)])), Nullable: f => x => x == null ? null : f(x), }; export const Events = { On: (name, callback) => { globalThis.__wailsEvents = globalThis.__wailsEvents || {}; globalThis.__wailsEvents[name] = callback; }, }; const wait = ms => new Promise(resolve => setTimeout(resolve, ms)); export const Call = { ByID: async (id, ...args) => { if (id === 3062805628) return globalThis.__relayState; if (id === 2130459618) return { ok: false, status: 503, durationMs: 12 }; if (id === 2419338323) { if (globalThis.__openExternalURLShouldFail) throw new Error("默认浏览器打开失败"); globalThis.__openedExternalURL = args[0]; return; } if (id === 1536866851 || id === 2451788025 || id === 1654359792) { await wait(450); return; } if (id === 215903019) { globalThis.__relayState.doge.notifications.unreadCount = 0; return; } if (id === 93543395) { globalThis.__relayState.doge.tokenSwitch = null; if (globalThis.__relayState.doge.tokenSwitches) for (const [category, prompt] of Object.entries(globalThis.__relayState.doge.tokenSwitches)) if (prompt?.key === args[0]) delete globalThis.__relayState.doge.tokenSwitches[category]; return; } if (id === 3647092161) { globalThis.__relayState.doge.tokenSwitch = null; return; } if (id === 3707202435) { globalThis.__relayState.needsOnboarding = false; return; } if (id === 1746439210) { globalThis.__relayState.proxyPort = args[0]; return; } if (id === 3841417432) { globalThis.__relayState.doge.syncIntervalMinutes = args[0]; return; } if (id === 3757833444) { const [category, ids] = args; globalThis.__lastFailoverOrderArgs = { category, ids: [...ids] }; globalThis.__relayState.failoverOrder[category] = [...ids]; return; } if (id === 1862834343) { const profile = globalThis.__relayState.profiles.find(item => item.id === args[0]); if (profile) profile.skipAutoSwitch = !args[1]; return; } if (id === 1477342492) return (args[0] || "C:\\\\Users\\\\Ricky-Desktop\\\\.CodexRelay") + "\\\\picked"; if (id === 2510123141) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.configDir = args[1]; return; } if (id === 2542801733) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.skipConfigReplacement = args[1]; return; } if (id === 3032635246) { globalThis.__relayState.dataDirectory = args[0]; return; } return; } };`);
     return;
   }
   const filePath = requestPath === "/logo.png" ? path.join(projectRoot, "logo.png") : path.join(frontendRoot, requestPath === "/" ? "index.html" : requestPath.slice(1));
@@ -99,8 +101,14 @@ const server = http.createServer((request, response) => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text) => { globalThis.__copiedText = text; } } });
     });
     const toolbar = await page.locator(".toolbar-actions > *").evaluateAll((items) => items.map((item) => item.id || item.className));
-    const expected = ["dogeQuotaWrap", "openDogeTopup", "announcementWrap", "refreshDoge", "openSettings", "addProfile"];
+    const expected = ["pendingDogeImport", "dogeQuotaWrap", "openDogeTopup", "announcementWrap", "refreshDoge", "openSettings", "addProfile"];
     if (toolbar.join() !== expected.join()) throw new Error(`工具栏顺序错误: ${toolbar.join()}`);
+    const activeSummary = await page.evaluate(() => {
+      const countLine = document.querySelector(".active-count-line");
+      const mode = document.querySelector("#failoverStatus");
+      return { text: mode.textContent, countTop: countLine.getBoundingClientRect().top, modeTop: mode.getBoundingClientRect().top };
+    });
+    if (activeSummary.text !== "模式：手动提示" || activeSummary.modeTop <= activeSummary.countTop) throw new Error(`主页启用状态未分为两行: ${JSON.stringify(activeSummary)}`);
     await page.click("#addProfile");
     if (await page.locator("#apiKey").getAttribute("type") !== "password") throw new Error("编辑页 API 密钥仍以明文输入框显示");
     if ((await page.locator("#previewToken").textContent()).includes(state.localAccessToken)) throw new Error("编辑页预览仍显示完整本地密钥");
@@ -124,6 +132,67 @@ const server = http.createServer((request, response) => {
     await page.click("#addModel");
     if (await page.locator("#modelRows .model-row").count() !== 1) throw new Error("手动添加模型行失败");
     await page.reload({ waitUntil: "networkidle" });
+
+    const sortState = JSON.parse(JSON.stringify(state));
+    sortState.preferences = { ...sortState.preferences, defaultSource: "", defaultCategory: "codex" };
+    sortState.tokenSwitch = { ...sortState.tokenSwitch, mode: "auto" };
+    sortState.profiles = [
+      { id: "custom-first", source: "custom", category: "codex", name: "自定义测试", note: "自定义来源", active: false },
+      { id: "doge-middle", source: "doge", category: "codex", name: "Codex 低价组", note: "二狗子来源", remoteTokenId: 42, active: true },
+      { id: "doge-disabled", source: "doge", category: "codex", name: "Codex 临时不可用", note: "等待分组恢复", remoteTokenId: 43, active: false },
+      { id: "doge-missing", source: "doge", category: "codex", name: "目录已删除", note: "不应显示", remoteTokenId: 44, active: false },
+      { id: "custom-last", source: "custom", category: "codex", name: "自定义备用", note: "自定义来源", active: false, skipAutoSwitch: true },
+    ];
+    sortState.activeProfiles = { codex: "doge-middle" };
+    sortState.failoverOrder = { codex: ["custom-first", "doge-middle", "doge-disabled", "custom-last"] };
+    sortState.doge.bound = true;
+    sortState.doge.tokens = [
+      { id: 42, profileId: "doge-middle", name: "Codex 低价组", maskedKey: "sk-****", status: 1, group: "GPT低价组", groupDisplayName: "GPT低价组", groupRatio: 0.02, category: "codex", imported: true, needsCategory: false, permitted: true, active: true },
+      { id: 43, profileId: "doge-disabled", name: "Codex 临时不可用", maskedKey: "sk-****", status: 2, group: "GPT低价组", groupDisplayName: "GPT低价组", groupRatio: 0.02, category: "codex", imported: true, needsCategory: false, permitted: false, active: false },
+    ];
+    const sortPage = await browser.newPage({ viewport: { width: 1170, height: 724 }, deviceScaleFactor: 1 });
+    await sortPage.addInitScript((value) => { globalThis.__relayState = value; }, sortState);
+    await sortPage.goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "networkidle" });
+    if (await sortPage.locator('[data-profile-id="doge-missing"]').count() !== 0) throw new Error("目录已删除的二狗子 Profile 被回退为普通可切换行");
+    const autoModeButtons = sortPage.locator('.profile-auto-switch-icon');
+    if (await autoModeButtons.count() !== 4 || !(await autoModeButtons.nth(0).getAttribute("src")).endsWith("/icons/auto.svg") || !(await autoModeButtons.nth(3).getAttribute("src")).endsWith("/icons/skip.svg")) throw new Error("自动/跳过令牌按钮状态错误");
+    await autoModeButtons.nth(3).click();
+    await sortPage.waitForFunction(() => document.querySelector('[data-profile-id="custom-last"] .profile-auto-switch-icon')?.getAttribute("src")?.endsWith("/icons/auto.svg"));
+    const disabledRow = sortPage.locator('[data-profile-id="doge-disabled"]');
+    const disabledButtons = disabledRow.locator('.profile-actions button');
+    if (!(await disabledRow.getAttribute("draggable")) || !(await disabledRow.locator('.drag-handle').getAttribute("draggable"))) throw new Error("临时禁用令牌没有保留拖拽能力");
+    if (!(await disabledButtons.nth(0).isDisabled()) || await disabledButtons.nth(1).isDisabled() || await disabledButtons.nth(2).isDisabled() || await disabledButtons.nth(3).isDisabled() || await disabledButtons.nth(4).isDisabled()) throw new Error("临时禁用令牌应只禁用切换按钮");
+    const disabledOpacity = await disabledRow.evaluate((row) => getComputedStyle(row).opacity);
+    if (disabledOpacity !== "0.52") throw new Error(`临时禁用令牌应保留不可用视觉状态: opacity=${disabledOpacity}`);
+    const draggingBorder = await disabledRow.evaluate((row) => {
+      row.classList.add("dragging");
+      const style = getComputedStyle(row);
+      const result = { outline: style.outlineStyle, shadow: style.boxShadow };
+      row.classList.remove("dragging");
+      return result;
+    });
+    if (draggingBorder.outline === "none" || !draggingBorder.shadow.includes("inset")) throw new Error(`拖动状态左边框样式未生效: ${JSON.stringify(draggingBorder)}`);
+    const customHandle = sortPage.locator('[data-profile-id="custom-first"] .drag-handle');
+    const dogeRow = sortPage.locator('[data-profile-id="doge-middle"]');
+    const dogeBounds = await dogeRow.boundingBox();
+    if (!dogeBounds) throw new Error("跨来源排序测试未找到二狗子令牌行");
+    await customHandle.dragTo(dogeRow, { targetPosition: { x: dogeBounds.width / 2, y: dogeBounds.height - 4 } });
+    await sortPage.waitForFunction(() => Boolean(globalThis.__lastFailoverOrderArgs), null, { timeout: 3000 });
+    const reorderCall = await sortPage.evaluate(() => globalThis.__lastFailoverOrderArgs);
+    if (reorderCall.category !== "codex" || reorderCall.ids.join() !== "doge-middle,custom-first,doge-disabled,custom-last") throw new Error(`跨来源拖拽提交顺序错误: ${JSON.stringify(reorderCall)}`);
+    await sortPage.waitForFunction(() => Array.from(document.querySelectorAll('#profileList [data-sort-kind="failover-codex"]')).map((row) => row.dataset.profileId).join() === "doge-middle,custom-first,doge-disabled,custom-last");
+    await sortPage.evaluate(() => { globalThis.__lastFailoverOrderArgs = null; });
+    const disabledHandle = sortPage.locator('[data-profile-id="doge-disabled"] .drag-handle');
+    const firstRow = sortPage.locator('[data-profile-id="doge-middle"]');
+    const firstBounds = await firstRow.boundingBox();
+    if (!firstBounds) throw new Error("临时禁用令牌排序测试未找到目标行");
+    await disabledHandle.dragTo(firstRow, { targetPosition: { x: firstBounds.width / 2, y: 4 } });
+    await sortPage.waitForFunction(() => Boolean(globalThis.__lastFailoverOrderArgs), null, { timeout: 3000 });
+    const disabledReorderCall = await sortPage.evaluate(() => globalThis.__lastFailoverOrderArgs);
+    if (disabledReorderCall.category !== "codex" || disabledReorderCall.ids.join() !== "doge-disabled,doge-middle,custom-first,custom-last") throw new Error(`临时禁用令牌拖拽提交顺序错误: ${JSON.stringify(disabledReorderCall)}`);
+    await sortPage.screenshot({ path: path.join(projectRoot, ".tmp", "disabled-token-sort-ui-smoke.png") });
+    await sortPage.close();
+
     if (await page.locator("#announcementBadge").textContent() !== "1") throw new Error("公告未读数字未显示");
     await page.evaluate(() => {
       globalThis.__relayState.doge.bound = true;
@@ -131,10 +200,26 @@ const server = http.createServer((request, response) => {
       globalThis.__wailsEvents["relay-state-changed"]();
     });
     await page.waitForTimeout(50);
-    if (await page.locator(".doge-token-row").count() !== 1 || !(await page.locator(".doge-token-row").textContent()).includes("后台更新令牌")) throw new Error("后台状态事件未刷新令牌目录");
+    if (await page.locator(".doge-token-row").count() !== 0) throw new Error("后台同步的待导入令牌不应直接进入主页列表");
+    if (await page.locator("#pendingDogeImport").isHidden() || await page.locator("#pendingDogeImportCount").textContent() !== "1") throw new Error("后台同步未显示醒目的待导入入口");
+    if (!(await page.locator("#dogeCategoryModal").isHidden())) throw new Error("后台自动同步不应主动弹出分组窗口");
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "pending-import-ui-smoke.png") });
+    await page.click("#refreshDoge");
+    await page.locator("#dogeCategoryModal").waitFor({ state: "visible", timeout: 3000 }).catch(() => { throw new Error("手动同步后未立即弹出待导入分组窗口"); });
+    await page.click("#closeDogeCategoryModal");
     await page.evaluate(() => {
+      globalThis.__relayState.profiles = Array.from({ length: 20 }, (_, index) => ({
+        id: `profile-${42 + index}`,
+        source: "doge",
+        category: "codex",
+        name: `滚动测试令牌 ${index + 1}`,
+        remoteTokenId: 42 + index,
+        active: index === 0,
+      }));
+      globalThis.__relayState.failoverOrder = { codex: globalThis.__relayState.profiles.map((profile) => profile.id) };
       globalThis.__relayState.doge.tokens = Array.from({ length: 20 }, (_, index) => ({
         id: 42 + index,
+        profileId: `profile-${42 + index}`,
         name: `滚动测试令牌 ${index + 1}`,
         maskedKey: "sk-****",
         status: 1,
@@ -142,14 +227,30 @@ const server = http.createServer((request, response) => {
         groupDisplayName: "余额低价组",
         groupRatio: 0.02,
         category: "codex",
-        imported: false,
+        imported: true,
         needsCategory: false,
         permitted: true,
-        active: false,
+        active: index === 0,
       }));
       globalThis.__wailsEvents["relay-state-changed"]();
     });
     await page.waitForTimeout(50);
+    if (!(await page.locator("#pendingDogeImport").isHidden()) || await page.locator(".profile-auto-switch-icon").count() !== 0) throw new Error("导入完成或手动模式的主页按钮状态错误");
+    if (await page.locator('[aria-label="测试令牌 API"]').count() !== 20) throw new Error("测试令牌 API 按钮名称或数量错误");
+    await page.locator('[aria-label="测试令牌 API"]').first().click();
+    await page.locator("#toast.error.show").waitFor({ state: "visible" });
+    await page.waitForFunction(() => {
+      const toast = document.querySelector("#toast");
+      return toast?.classList.contains("error") && !toast.classList.contains("show");
+    }, null, { timeout: 4000 });
+    const fadingErrorToast = await page.locator("#toast").evaluate((node) => ({
+      className: node.className,
+      backgroundColor: getComputedStyle(node).backgroundColor,
+      color: getComputedStyle(node).color,
+    }));
+    if (!fadingErrorToast.className.includes("error") || fadingErrorToast.backgroundColor !== "rgb(255, 241, 241)" || fadingErrorToast.color !== "rgb(181, 47, 47)") throw new Error(`错误提示淡出时改变了颜色: ${JSON.stringify(fadingErrorToast)}`);
+    await page.waitForTimeout(250);
+    if (await page.locator("#toast").getAttribute("class") !== "toast") throw new Error("错误提示淡出完成后未清理状态");
     const profileScrollLayout = await page.evaluate(() => {
       const view = document.querySelector("#profilesView");
       const toolbar = view.querySelector(".app-toolbar");
@@ -175,6 +276,10 @@ const server = http.createServer((request, response) => {
     if (await page.locator("#announcementNoticePane strong").count() !== 1) throw new Error("Markdown 加粗未渲染");
     if (await page.locator("#announcementNoticePane a").count() !== 1) throw new Error("危险链接未被过滤");
     if (await page.locator("#announcementNoticePane a").getAttribute("target") !== "_blank") throw new Error("公告链接未设置安全打开方式");
+    const announcementPopup = page.waitForEvent("popup", { timeout: 250 }).then(() => true).catch(() => false);
+    await page.locator("#announcementNoticePane a").click();
+    if (await announcementPopup) throw new Error("公告外链未交给默认浏览器，仍打开了 WebView 新窗口");
+    if (!page.url().endsWith(`/`)) throw new Error("点击公告外链后仍在应用内导航");
     await page.click("#refreshDoge");
     const refreshLoadingClass = await page.locator("#refreshDoge .icon").getAttribute("class");
     if (!refreshLoadingClass.split(" ").includes("icon-load") || !refreshLoadingClass.split(" ").includes("spin")) throw new Error("刷新按钮未使用统一加载图标");
@@ -186,7 +291,7 @@ const server = http.createServer((request, response) => {
     if (await page.locator("#announcementTimelinePane h2").count() !== 1) throw new Error("历史公告 Markdown 标题未渲染");
     await page.click("#closeAnnouncements");
     await page.click("#openSettings");
-    if (await page.locator("#defaultSource").inputValue() !== "doge" || await page.locator("#defaultCategory").inputValue() !== "codex") throw new Error("默认来源或类别未显示为二狗子/Codex");
+    if (await page.locator("#defaultSource").inputValue() !== "" || await page.locator("#defaultCategory").inputValue() !== "codex") throw new Error("默认来源或类别未显示为全部/Codex");
     await page.click('#settingsTabs button[data-tab="advanced"]');
     if (await page.locator("#dataDirectory").inputValue() !== "C:\\Users\\Ricky-Desktop\\.CodexRelay") throw new Error("CodexRelay 默认数据目录未显示");
     if (await page.locator(".client-config-row").count() !== 2) throw new Error("外部客户端路径行未显示");
@@ -202,6 +307,27 @@ const server = http.createServer((request, response) => {
     await page.waitForTimeout(50);
     if (await page.locator("#dataDirectory").inputValue() !== "C:\\Users\\Ricky-Desktop\\.CodexRelay\\picked") throw new Error("CodexRelay 数据目录选择未保存");
     await page.click('#settingsTabs button[data-tab="general"]');
+    const settingsGrid = await page.evaluate(() => ({
+      triggerColumns: getComputedStyle(document.querySelector(".trigger-option-grid")).gridTemplateColumns.split(" ").length,
+      categoryColumns: getComputedStyle(document.querySelector(".category-visibility-grid")).gridTemplateColumns.split(" ").length,
+      thresholdColumns: getComputedStyle(document.querySelector(".failover-threshold-grid")).gridTemplateColumns.split(" ").length,
+      triggers: document.querySelectorAll(".trigger-option-grid .compact-check-option").length,
+      categories: document.querySelectorAll(".category-visibility-grid .compact-check-option").length,
+      thresholds: document.querySelectorAll(".failover-threshold-grid .failover-threshold").length,
+      cardHeader: document.querySelector(".failover-setting-card")?.firstElementChild?.classList.contains("failover-card-header") || false,
+      cardLoop: document.querySelector(".failover-setting-card")?.lastElementChild?.classList.contains("failover-card-loop") || false,
+      homepageHeader: document.querySelector(".homepage-setting-card")?.firstElementChild?.classList.contains("homepage-card-header") || false,
+      homepageDefaults: document.querySelector(".homepage-setting-card")?.lastElementChild?.classList.contains("homepage-default-view") || false,
+      defaultControls: document.querySelectorAll(".homepage-default-view .preference-selects select").length,
+      thresholdGaps: Array.from(document.querySelectorAll(".failover-threshold"), (row) => {
+        const label = row.firstElementChild?.getBoundingClientRect();
+        const control = row.lastElementChild?.getBoundingClientRect();
+        return label && control ? Math.round(control.left - label.right) : -1;
+      }),
+    }));
+    if (settingsGrid.triggerColumns !== 3 || settingsGrid.categoryColumns !== 3 || settingsGrid.thresholdColumns !== 3 || settingsGrid.triggers !== 6 || settingsGrid.categories !== 9 || settingsGrid.thresholds !== 3 || !settingsGrid.cardHeader || !settingsGrid.cardLoop || !settingsGrid.homepageHeader || !settingsGrid.homepageDefaults || settingsGrid.defaultControls !== 3 || settingsGrid.thresholdGaps.some((gap) => gap < 0 || gap > 10)) throw new Error(`通用设置面板布局错误: ${JSON.stringify(settingsGrid)}`);
+    await page.locator(".failover-setting-card").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "settings-option-grid-ui-smoke.png") });
     const settingsScrollLayout = await page.evaluate(() => {
       const view = document.querySelector("#settingsView");
       const toolbar = view.querySelector(".subpage-toolbar");
@@ -239,6 +365,9 @@ const server = http.createServer((request, response) => {
     await page.click('#settingsTabs button[data-tab="about"]');
     const about = await page.locator("#aboutPanel").textContent();
     if (!about.includes("Ricky") || !about.includes("ergouzi.life") || !about.includes("dashboard/overview")) throw new Error("关于页信息未更新");
+    const aboutPopup = page.waitForEvent("popup", { timeout: 250 }).then(() => true).catch(() => false);
+    await page.locator("#aboutPanel a").first().click();
+    if (await aboutPopup) throw new Error("关于页外链未交给默认浏览器，仍打开了 WebView 新窗口");
     const connection = await browser.newPage({ viewport: { width: 1120, height: 780 }, deviceScaleFactor: 1 });
     await connection.addInitScript((value) => { globalThis.__relayState = value; }, {
       ...state,
@@ -300,14 +429,14 @@ const server = http.createServer((request, response) => {
     if (!topupLoadingClass.split(" ").includes("icon-load") || !topupLoadingClass.split(" ").includes("spin")) throw new Error("兑换按钮未使用统一加载图标");
     await connection.waitForTimeout(900);
     await connection.close();
-    const popup = await browser.newPage({ viewport: { width: 450, height: 320 }, deviceScaleFactor: 1 });
+    const popup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
     await popup.addInitScript((value) => { globalThis.__relayState = value; }, {
       ...state,
       doge: {
         ...state.doge,
         notifications: {
           ...state.doge.notifications,
-          announcements: [{ ...state.doge.notifications.announcements[0], content: "# 公告标题\n\n" + "长公告内容 ".repeat(100) }],
+          announcements: [{ ...state.doge.notifications.announcements[0], content: "# 公告标题\n\n[通知链接](https://example.com/notification)\n\n" + "长公告内容 ".repeat(100) }],
         },
       },
     });
@@ -316,9 +445,15 @@ const server = http.createServer((request, response) => {
     if (await popup.locator(".notification-markdown h1").count() !== 1) throw new Error("右下角 Markdown 标题未渲染");
     const announcementText = await popup.locator(".notification-markdown").textContent();
     if (announcementText.length <= 300 || !announcementText.includes("长公告内容 长公告内容")) throw new Error("右下角公告正文被截断");
+    await popup.evaluate(() => { globalThis.__openExternalURLShouldFail = true; });
+    const notificationPopup = popup.waitForEvent("popup", { timeout: 250 }).then(() => true).catch(() => false);
+    await popup.locator(".notification-markdown a").click();
+    if (await notificationPopup) throw new Error("提醒窗口外链未交给默认浏览器，仍打开了 WebView 新窗口");
+    await popup.locator("#notificationStatus").waitFor({ state: "visible" });
+    if (!(await popup.locator("#notificationStatus").textContent()).includes("默认浏览器打开失败")) throw new Error("普通通知未显示默认浏览器打开失败信息");
     const announcementCard = await popup.locator("#notificationCard").boundingBox();
     const announcementViewport = popup.viewportSize();
-    if (!announcementCard || !announcementViewport || Math.abs(announcementCard.x - 10) > 1 || Math.abs(announcementCard.y - 10) > 1 || Math.abs(announcementViewport.width - announcementCard.x - announcementCard.width - 10) > 1 || Math.abs(announcementViewport.height - announcementCard.y - announcementCard.height - 10) > 1) throw new Error(`公告窗口边距不一致: ${JSON.stringify({ announcementCard, announcementViewport })}`);
+    if (!announcementCard || !announcementViewport || Math.abs(announcementCard.x) > 1 || Math.abs(announcementCard.y) > 1 || Math.abs(announcementViewport.width - announcementCard.width) > 1 || Math.abs(announcementViewport.height - announcementCard.height) > 1) throw new Error(`公告窗口没有填满原生窗口: ${JSON.stringify({ announcementCard, announcementViewport })}`);
     const announcementLayout = await popup.evaluate(() => {
       const card = document.querySelector("#notificationCard");
       const heading = document.querySelector(".notification-heading");
@@ -335,7 +470,7 @@ const server = http.createServer((request, response) => {
     if (!(await popup.locator("#notificationCard").evaluate((node) => getComputedStyle(node).overflow === "hidden"))) throw new Error("通知卡片外层仍可滚动");
     await popup.screenshot({ path: path.join(projectRoot, ".tmp", "announcement-popup-simulated.png") });
     await popup.close();
-    const switchPopup = await browser.newPage({ viewport: { width: 450, height: 320 }, deviceScaleFactor: 1 });
+    const switchPopup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
     await switchPopup.addInitScript((value) => { globalThis.__relayState = value; }, {
       ...state,
       doge: {
@@ -343,6 +478,7 @@ const server = http.createServer((request, response) => {
         tokenSwitch: {
           key: "doge-profile|auth",
           category: "codex",
+          mode: "manual",
           failureKind: "auth",
           failureCount: 5,
           failureStatus: 403,
@@ -350,23 +486,27 @@ const server = http.createServer((request, response) => {
           currentName: "当前令牌",
           currentGroup: "余额低价组",
           currentRatio: 0.02,
+          stopped: true,
+          stopMessage: "不应显示的自动停止状态",
           message: "当前令牌连续 5 次返回 HTTP 403，是否切换同类别的其他可用令牌？",
           candidates: [
-            { tokenId: 42, name: "Codex 低价组", source: "二狗子 API", group: "余额低价组", ratio: 0.02, selectable: true },
-            { tokenId: 43, name: "Codex 稳定组", source: "二狗子 API", group: "余额稳定组", ratio: 0.025, selectable: true },
+            { tokenId: 42, profileId: "doge-42", name: "Codex 低价组 (GPT低价组·0.02)", source: "二狗子 API", group: "余额低价组", ratio: 0.02, selectable: true },
+            { tokenId: 43, profileId: "doge-43", name: "Codex 稳定组 (GPT稳定组·0.025)", source: "二狗子 API", group: "余额稳定组", ratio: 0.025, selectable: true },
+            { tokenId: 0, profileId: "custom-44", name: "OpenRouter 主线路（自定义 API）", source: "自定义 API", group: "", ratio: 0, selectable: true },
           ],
         },
       },
     });
     await switchPopup.goto(`http://127.0.0.1:${address.port}/notification.html?kind=token-switch`, { waitUntil: "networkidle" });
     if (!(await switchPopup.locator("#tokenSwitchMessage").textContent()).includes("HTTP 403")) throw new Error("令牌切换提示未显示");
+    if (await switchPopup.locator("#notificationTitle").textContent() !== "令牌切换提醒" || !(await switchPopup.locator("#tokenStopPanel").isHidden())) throw new Error("手动提示错误显示了自动停止状态");
     const switchCandidates = await switchPopup.locator("#tokenSwitchCandidates option").allTextContents();
-    if (switchCandidates.join("|") !== "Codex 低价组(余额低价组 · 0.02)|Codex 稳定组(余额稳定组 · 0.025)") throw new Error("候选令牌格式错误");
+    if (switchCandidates.join("|") !== "Codex 低价组 (GPT低价组·0.02)|Codex 稳定组 (GPT稳定组·0.025)|OpenRouter 主线路（自定义 API）") throw new Error("候选令牌格式错误");
     if (await switchPopup.locator("#cancelTokenSwitch").textContent() !== "取消" || await switchPopup.locator("#confirmTokenSwitch").textContent() !== "确定") throw new Error("令牌切换按钮文案错误");
     if (await switchPopup.locator("button:visible").count() !== 2 || !(await switchPopup.locator("#dismissNotification").isHidden())) throw new Error("令牌切换窗口出现多余操作按钮");
     const switchCard = await switchPopup.locator("#notificationCard").boundingBox();
     const switchViewport = switchPopup.viewportSize();
-    if (!switchCard || !switchViewport || Math.abs(switchCard.x - 10) > 1 || Math.abs(switchCard.y - 10) > 1 || Math.abs(switchViewport.width - switchCard.x - switchCard.width - 10) > 1 || Math.abs(switchViewport.height - switchCard.y - switchCard.height - 10) > 1) throw new Error(`令牌切换窗口边距不一致: ${JSON.stringify({ switchCard, switchViewport })}`);
+    if (!switchCard || !switchViewport || Math.abs(switchCard.x) > 1 || Math.abs(switchCard.y) > 1 || Math.abs(switchViewport.width - switchCard.width) > 1 || Math.abs(switchViewport.height - switchCard.height) > 1) throw new Error(`令牌切换窗口没有填满原生窗口: ${JSON.stringify({ switchCard, switchViewport })}`);
     if (!announcementCard || Math.abs(announcementCard.width - switchCard.width) > 1 || Math.abs(announcementCard.height - switchCard.height) > 1) throw new Error(`提醒窗口尺寸未统一: ${JSON.stringify({ announcementCard, switchCard })}`);
     await switchPopup.screenshot({ path: path.join(projectRoot, ".tmp", "token-switch-ui-smoke.png") });
     await switchPopup.click("#cancelTokenSwitch");
@@ -383,7 +523,7 @@ const server = http.createServer((request, response) => {
         screenshot: "token-switch-5xx-ui-smoke.png",
       },
     ]) {
-      const variantPopup = await browser.newPage({ viewport: { width: 450, height: 320 }, deviceScaleFactor: 1 });
+      const variantPopup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
       await variantPopup.addInitScript((value) => { globalThis.__relayState = value; }, {
         ...state,
         doge: {
@@ -391,15 +531,16 @@ const server = http.createServer((request, response) => {
           tokenSwitch: {
             key: "doge-profile|variant",
             category: "codex",
+            mode: "manual",
             failureKind: variant.status === 401 ? "auth" : "upstream",
             failureCount: 5,
             failureStatus: variant.status,
             currentTokenId: 41,
-            currentName: "Codex 低价组",
+            currentName: "Codex 低价组 (GPT低价组·0.02)",
             currentGroup: "余额低价组",
             currentRatio: 0.02,
             message: variant.message,
-            candidates: [{ tokenId: 42, name: "Codex 低价组", source: "二狗子 API", group: "余额低价组", ratio: 0.02, selectable: true }],
+            candidates: [{ tokenId: 42, name: "Codex 低价组 (GPT低价组·0.02)", source: "二狗子 API", group: "余额低价组", ratio: 0.02, selectable: true }],
           },
         },
       });
@@ -408,6 +549,78 @@ const server = http.createServer((request, response) => {
       await variantPopup.screenshot({ path: path.join(projectRoot, ".tmp", variant.screenshot) });
       await variantPopup.close();
     }
+    const autoPopup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
+    await autoPopup.addInitScript((value) => { globalThis.__relayState = value; }, {
+      ...state,
+      doge: {
+        ...state.doge,
+        tokenSwitch: {
+          key: "doge-profile|auto",
+          category: "codex",
+          mode: "auto",
+          failureKind: "auth",
+          failureCount: 5,
+          failureStatus: 401,
+          currentTokenId: 41,
+          currentName: "Codex 低价组 (GPT低价组·0.02)",
+          currentGroup: "GPT低价组",
+          currentRatio: 0.02,
+          switchedToName: "Codex 稳定组 (GPT稳定组·0.025)",
+          message: "当前 Codex 低价组 (GPT低价组·0.02) 连续 5 次返回 HTTP 401，已达到故障阈值。\n已自动切换至 Codex 稳定组 (GPT稳定组·0.025)。",
+          candidates: [],
+        },
+      },
+    });
+    await autoPopup.goto(`http://127.0.0.1:${address.port}/notification.html?kind=token-switch`, { waitUntil: "networkidle" });
+    if (await autoPopup.locator("#notificationTitle").textContent() !== "已自动切换令牌") throw new Error("自动切换通知标题错误");
+    if (!(await autoPopup.locator("#tokenSwitchMessage").textContent()).includes("已自动切换至 Codex 稳定组 (GPT稳定组·0.025)")) throw new Error("自动切换通知目标名称错误");
+    if (await autoPopup.locator("#dismissNotification").isHidden() || !(await autoPopup.locator("#tokenSwitchActions").isHidden()) || !(await autoPopup.locator("#tokenSwitchCandidates").isHidden())) throw new Error("自动切换通知操作区错误");
+    if (await autoPopup.locator("button:visible").count() !== 1) throw new Error("自动切换通知出现多余按钮");
+    await autoPopup.click("#dismissNotification");
+    await autoPopup.close();
+    const stoppedPopup = await browser.newPage({ viewport: { width: 430, height: 400 }, deviceScaleFactor: 1 });
+    await stoppedPopup.addInitScript((value) => { globalThis.__relayState = value; }, {
+      ...state,
+      doge: {
+        ...state.doge,
+        tokenSwitch: {
+          key: "profile-c|stopped",
+          category: "codex",
+          mode: "auto",
+          stopped: true,
+          currentName: "令牌 C（自定义 API）",
+          stopMessage: "当前类别暂无可用令牌，已停止自动切换。",
+          message: "本轮令牌均已尝试，自动切换已停止。",
+          candidates: [],
+          switchHistory: [
+            { fromName: "令牌 A（自定义 API）", toName: "令牌 B（自定义 API）", switchedAt: "2026-08-24 12:00:00", failureMessage: "连续 5 次返回 HTTP 401" },
+            { fromName: "令牌 C（自定义 API）", toName: "", switchedAt: "2026-08-24 12:02:00", failureMessage: "连续 5 次返回 HTTP 401" },
+          ],
+        },
+      },
+    });
+    await stoppedPopup.goto(`http://127.0.0.1:${address.port}/notification.html?kind=token-switch`, { waitUntil: "networkidle" });
+    const stoppedRows = stoppedPopup.locator(".token-switch-history-row");
+    if (await stoppedRows.count() !== 2 || !(await stoppedRows.nth(0).textContent()).includes("切换时间：") || !(await stoppedRows.nth(1).textContent()).includes("故障时间：")) throw new Error("自动切换停止历史的时间类型错误");
+    const finalFailureText = await stoppedRows.nth(1).textContent();
+    if (!finalFailureText.includes("令牌 C（自定义 API）") || finalFailureText.includes("→") || !finalFailureText.includes("错误信息：连续 5 次返回 HTTP 401")) throw new Error(`最后一个令牌故障记录错误: ${finalFailureText}`);
+    await stoppedPopup.screenshot({ path: path.join(projectRoot, ".tmp", "token-switch-stopped-ui-smoke.png") });
+    await stoppedPopup.close();
+    const categoryState = JSON.parse(JSON.stringify(state));
+    categoryState.doge.tokenSwitch = null;
+    categoryState.doge.tokenSwitches = {
+      codex: { key: "codex|auto", category: "codex", mode: "auto", currentName: "Codex A（自定义 API）", switchedToName: "Codex B（自定义 API）", message: "Codex 类别已自动切换", candidates: [] },
+      claude: { key: "claude|auto", category: "claude", mode: "auto", currentName: "Claude A（自定义 API）", switchedToName: "Claude B（自定义 API）", message: "Claude 类别已自动切换", candidates: [] },
+    };
+    const codexPopup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
+    const claudePopup = await browser.newPage({ viewport: { width: 430, height: 300 }, deviceScaleFactor: 1 });
+    await codexPopup.addInitScript((value) => { globalThis.__relayState = value; }, categoryState);
+    await claudePopup.addInitScript((value) => { globalThis.__relayState = value; }, categoryState);
+    await codexPopup.goto(`http://127.0.0.1:${address.port}/notification.html?kind=token-switch&category=codex`, { waitUntil: "networkidle" });
+    await claudePopup.goto(`http://127.0.0.1:${address.port}/notification.html?kind=token-switch&category=claude`, { waitUntil: "networkidle" });
+    if (!(await codexPopup.locator("#tokenSwitchMessage").textContent()).includes("Codex 类别") || !(await claudePopup.locator("#tokenSwitchMessage").textContent()).includes("Claude 类别")) throw new Error("不同类别令牌通知发生覆盖");
+    await codexPopup.close();
+    await claudePopup.close();
     const onboarding = await browser.newPage({ viewport: { width: 560, height: 700 }, deviceScaleFactor: 1 });
     await onboarding.addInitScript((value) => { globalThis.__relayState = value; }, { ...state, needsOnboarding: true });
     await onboarding.goto(`http://127.0.0.1:${address.port}/`, { waitUntil: "networkidle" });
@@ -418,9 +631,15 @@ const server = http.createServer((request, response) => {
     await onboarding.click("#openDogeProfile");
     await onboarding.click("#bindOnboarding");
     if (await onboarding.locator("#onboardingError").isHidden()) throw new Error("空令牌校验未显示");
+    await onboarding.evaluate(() => {
+      globalThis.__relayState.needsOnboarding = false;
+      globalThis.__relayState.doge.bound = true;
+      globalThis.__relayState.doge.tokens = [{ id: 91, name: "首次同步令牌", maskedKey: "sk-****", status: 1, imported: false, profileId: "", category: "", needsCategory: true }];
+    });
+    await onboarding.fill("#onboardingToken", "fake-access-token");
+    await onboarding.click("#bindOnboarding");
+    if (await onboarding.locator("#dogeCategoryModal").isHidden()) throw new Error("首次绑定同步后未立即弹出令牌分组窗口");
     await onboarding.screenshot({ path: path.join(projectRoot, ".tmp", "onboarding-ui-smoke.png"), fullPage: true });
-    await onboarding.click("#skipOnboarding");
-    if (!(await onboarding.locator("#onboardingModal").isHidden())) throw new Error("跳过首次引导后弹窗仍显示");
     await onboarding.close();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.click('#settingsTabs button[data-tab="general"]');
@@ -445,6 +664,7 @@ const server = http.createServer((request, response) => {
     console.log(JSON.stringify({ toolbar, overflow, screenshot: ".tmp/notification-ui-smoke.png" }));
   } finally {
     await browser.close();
+    server.closeAllConnections();
     server.close();
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

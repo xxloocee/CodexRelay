@@ -7,6 +7,8 @@
  * @Project       : CodexRelay
  * @Description   : 非 Windows 默认浏览器打开外部链接
  * @File          : 非 Windows 外部 URL 打开实现
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package platform
 
@@ -38,7 +40,7 @@ func validateExternalURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", errors.New("购买入口地址无效")
+		return "", errors.New("外部链接地址无效")
 	}
 	return parsed.String(), nil
 }

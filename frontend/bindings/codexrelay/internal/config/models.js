@@ -7,6 +7,58 @@
 import { Create as $Create } from "/wails/runtime.js";
 
 /**
+ * DogeAlertSettings 是通用设置页编辑的余额和套餐提醒配置；金额单位为美元。
+ */
+export class DogeAlertSettings {
+    /**
+     * Creates a new DogeAlertSettings instance.
+     * @param {Partial<DogeAlertSettings>} [$$source = {}] - The source object to create the DogeAlertSettings.
+     */
+    constructor($$source = {}) {
+        if (!("balanceEnabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["balanceEnabled"] = false;
+        }
+        if (!("balanceThresholdUsd" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["balanceThresholdUsd"] = 0;
+        }
+        if (!("subscriptionEnabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["subscriptionEnabled"] = false;
+        }
+        if (!("subscriptionThresholdUsd" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["subscriptionThresholdUsd"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeAlertSettings instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeAlertSettings}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeAlertSettings(/** @type {Partial<DogeAlertSettings>} */($$parsedSource));
+    }
+}
+
+/**
  * Preferences 保存窗口生命周期、主页类别可见性、默认筛选和恢复策略；不会改变代理运行时路由。
  */
 export class Preferences {
@@ -80,6 +132,108 @@ export class Preferences {
             $$parsedSource["visibleCategories"] = $$createField3_0($$parsedSource["visibleCategories"]);
         }
         return new Preferences(/** @type {Partial<Preferences>} */($$parsedSource));
+    }
+}
+
+/**
+ * TokenSwitchSettings 保存所有来源共用的令牌故障处理策略。
+ * 候选仍限制在当前请求类别；来源只决定候选 Profile 的连接信息，不参与故障处理分流。
+ */
+export class TokenSwitchSettings {
+    /**
+     * Creates a new TokenSwitchSettings instance.
+     * @param {Partial<TokenSwitchSettings>} [$$source = {}] - The source object to create the TokenSwitchSettings.
+     */
+    constructor($$source = {}) {
+        if (!("mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["mode"] = "";
+        }
+        if (!("trigger401" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["trigger401"] = false;
+        }
+        if (!("trigger403" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["trigger403"] = false;
+        }
+        if (!("trigger5xx" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["trigger5xx"] = false;
+        }
+        if (!("triggerNetwork" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["triggerNetwork"] = false;
+        }
+        if (!("triggerDirectoryInvalid" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["triggerDirectoryInvalid"] = false;
+        }
+        if (!("triggerDirectoryMissing" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["triggerDirectoryMissing"] = false;
+        }
+        if (!("authFailureThreshold" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["authFailureThreshold"] = 0;
+        }
+        if (!("upstreamFailureThreshold" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["upstreamFailureThreshold"] = 0;
+        }
+        if (!("upstreamFailureWindowMinutes" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["upstreamFailureWindowMinutes"] = 0;
+        }
+        if (!("loop" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["loop"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TokenSwitchSettings instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TokenSwitchSettings}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TokenSwitchSettings(/** @type {Partial<TokenSwitchSettings>} */($$parsedSource));
     }
 }
 

@@ -5,6 +5,8 @@
  * @Project       : CodexRelay
  * @Description   : Codex API 中转热切换桌面工具
  * @File          : 当前配置格式与持久化回归测试
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package config
 
@@ -75,7 +77,7 @@ func TestDefaultLocalAccessTokenStartsWithSK(t *testing.T) {
 	if !strings.HasPrefix(cfg.LocalAccessToken, "sk-") {
 		t.Fatalf("local access token = %q", cfg.LocalAccessToken)
 	}
-	if len(cfg.Preferences.VisibleCategories) != len(Categories) || cfg.Preferences.DefaultSource != SourceDoge || cfg.Preferences.DefaultCategory != CategoryCodex || cfg.Preferences.RestoreViewMode != RestoreViewCurrent {
+	if len(cfg.Preferences.VisibleCategories) != len(Categories) || cfg.Preferences.DefaultSource != "" || cfg.Preferences.DefaultCategory != CategoryCodex || cfg.Preferences.RestoreViewMode != RestoreViewCurrent {
 		t.Fatalf("preference defaults = %+v", cfg.Preferences)
 	}
 }

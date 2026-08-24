@@ -5,6 +5,8 @@
  * @Project       : CodexRelay
  * @Description   : Codex API 中转热切换桌面工具
  * @File          : 二狗子接口分页请求回归测试
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package desktop
 
@@ -32,6 +34,7 @@ func TestBindDogeSendsTokenPaginationQuery(t *testing.T) {
 	var keyCalls int
 	var topupMethod string
 	var topupBody []byte
+	subscriptionEnd := time.Now().Add(72 * time.Hour).Unix()
 	tokenItems := []map[string]any{{
 		"id":              42,
 		"user_id":         7,
@@ -73,7 +76,7 @@ func TestBindDogeSendsTokenPaginationQuery(t *testing.T) {
 			writeDogeTestJSON(t, w, map[string]any{
 				"data": map[string]any{
 					"subscriptions": []any{map[string]any{
-						"subscription": map[string]any{"id": 9, "plan_id": 13, "amount_total": 2500000, "amount_used": 500000, "start_time": 1780000000, "end_time": 1780600000, "status": "active"},
+						"subscription": map[string]any{"id": 9, "plan_id": 13, "amount_total": 2500000, "amount_used": 500000, "start_time": time.Now().Add(-time.Hour).Unix(), "end_time": subscriptionEnd, "status": "active"},
 						"plan":         map[string]any{"title": "测试套餐"},
 					}},
 				},
@@ -291,6 +294,165 @@ func TestSyncDogeAnnouncementsInitializesReadStateAndDetectsNewItems(t *testing.
 	state = service.GetState().Doge.Notifications
 	if state.UnreadCount != 0 || len(state.Alerts) != 0 {
 		t.Fatalf("dismissed announcement state = %+v", state)
+	}
+}
+
+func TestReconcileDogeQuotaAlertRecordsPersistsOneRecordPerIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	notifications := config.DogeNotificationState{
+		BalanceAlertEnabled: true, BalanceAlertThresholdUSD: 1,
+		SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: 1,
+		DismissedAlertKeys: []string{},
+	}
+	account := config.DogeAccount{ID: 7, Quota: 400000}
+	subscriptions := []config.DogeSubscription{
+		{ID: 9, Status: "active", AmountTotal: 400000, EndTime: now.Add(time.Hour).Unix()},
+		{ID: 10, Status: "active", AmountTotal: 1500000, EndTime: now.Add(time.Hour).Unix()},
+	}
+
+	reconcileDogeQuotaAlertRecords(&notifications, account, subscriptions, now)
+	if len(notifications.BalanceAlertRecords) != 1 || notifications.BalanceAlertRecords[0].AccountID != 7 {
+		t.Fatalf("balance records after first low sync = %+v", notifications.BalanceAlertRecords)
+	}
+	if len(notifications.SubscriptionAlertRecords) != 2 || notifications.SubscriptionAlertRecords[0].SubscriptionID != 9 || notifications.SubscriptionAlertRecords[1].SubscriptionID != 10 || notifications.SubscriptionAlertRecords[1].State != subscriptionAlertStateExpiringSoon {
+		t.Fatalf("subscription records after first low sync = %+v", notifications.SubscriptionAlertRecords)
+	}
+	firstNotifiedAt := notifications.BalanceAlertRecords[0].NotifiedAt
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 7, Quota: 300000}, subscriptions, now.Add(time.Minute))
+	if len(notifications.BalanceAlertRecords) != 1 || notifications.BalanceAlertRecords[0].NotifiedAt != firstNotifiedAt {
+		t.Fatalf("same low state should keep one notification record = %+v", notifications.BalanceAlertRecords)
+	}
+
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 7, Quota: 1500000}, []config.DogeSubscription{
+		{ID: 9, Status: "active", AmountTotal: 2000000, EndTime: now.Add(time.Hour).Unix()},
+	}, now.Add(2*time.Minute))
+	if len(notifications.BalanceAlertRecords) != 0 || len(notifications.SubscriptionAlertRecords) != 1 || notifications.SubscriptionAlertRecords[0].State != subscriptionAlertStateExpiringSoon {
+		t.Fatalf("recovered quota should retain only the expiring-soon record = balance:%+v subscription:%+v", notifications.BalanceAlertRecords, notifications.SubscriptionAlertRecords)
+	}
+
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 7, Quota: 400000}, []config.DogeSubscription{
+		{ID: 9, Status: "expired", AmountTotal: 400000, EndTime: now.Add(-time.Minute).Unix()},
+	}, now.Add(3*time.Minute))
+	if len(notifications.BalanceAlertRecords) != 1 || notifications.BalanceAlertRecords[0].Acknowledged {
+		t.Fatalf("a later low state should create a fresh unacknowledged balance record = %+v", notifications.BalanceAlertRecords)
+	}
+	if len(notifications.SubscriptionAlertRecords) != 0 {
+		t.Fatalf("expired subscription should not keep a record = %+v", notifications.SubscriptionAlertRecords)
+	}
+}
+
+func TestReconcileDogeQuotaAlertRecordsUsesCustomThresholdAndAccountIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	notifications := config.DogeNotificationState{
+		BalanceAlertEnabled: true, BalanceAlertThresholdUSD: 2.5,
+		SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: 3.5,
+		DismissedAlertKeys: []string{},
+	}
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 11, Quota: 1000000}, []config.DogeSubscription{
+		{ID: 12, Status: "active", AmountTotal: 1500000, EndTime: now.Add(time.Hour).Unix()},
+	}, now)
+	if len(notifications.BalanceAlertRecords) != 1 || notifications.BalanceAlertRecords[0].ThresholdUSD != 2.5 {
+		t.Fatalf("custom balance threshold record = %+v", notifications.BalanceAlertRecords)
+	}
+	if len(notifications.SubscriptionAlertRecords) != 1 || notifications.SubscriptionAlertRecords[0].ThresholdUSD != 3.5 {
+		t.Fatalf("custom subscription threshold record = %+v", notifications.SubscriptionAlertRecords)
+	}
+
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 13, Quota: 1000000}, nil, now.Add(time.Minute))
+	if len(notifications.BalanceAlertRecords) != 2 || findDogeBalanceAlertRecord(notifications.BalanceAlertRecords, 13) < 0 {
+		t.Fatalf("account ID change should create a separate record = %+v", notifications.BalanceAlertRecords)
+	}
+}
+
+func TestReconcileDogeQuotaAlertRecordsDoesNotCreateDisabledAlerts(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	notifications := config.DogeNotificationState{
+		BalanceAlertThresholdUSD: 1, SubscriptionAlertThresholdUSD: 1,
+		DismissedAlertKeys: []string{},
+	}
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 7, Quota: 400000}, []config.DogeSubscription{
+		{ID: 9, Status: "active", AmountTotal: 400000, EndTime: now.Add(time.Hour).Unix()},
+	}, now)
+	if len(notifications.BalanceAlertRecords) != 0 || len(notifications.SubscriptionAlertRecords) != 0 {
+		t.Fatalf("disabled alerts should not create records = balance:%+v subscription:%+v", notifications.BalanceAlertRecords, notifications.SubscriptionAlertRecords)
+	}
+}
+
+func TestReconcileDogeSubscriptionLifecycleAndExpiredDismissal(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	notifications := config.DogeNotificationState{
+		SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: 1, DismissedAlertKeys: []string{},
+	}
+	subscription := config.DogeSubscription{ID: 21, PlanID: 8, PlanTitle: "即将到期套餐", Status: "active", AmountTotal: 2000000, AmountUsed: 500000, EndTime: now.Add(12 * time.Hour).Unix()}
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{}, []config.DogeSubscription{subscription}, now)
+	if len(notifications.SubscriptionAlertRecords) != 1 || notifications.SubscriptionAlertRecords[0].State != subscriptionAlertStateExpiringSoon {
+		t.Fatalf("expiring-soon state = %+v", notifications.SubscriptionAlertRecords)
+	}
+	notifications.SubscriptionAlertRecords[0].Acknowledged = true
+	subscription.Status = "expired"
+	subscription.EndTime = now.Add(-time.Minute).Unix()
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{}, []config.DogeSubscription{subscription}, now)
+	if len(notifications.SubscriptionAlertRecords) != 1 || notifications.SubscriptionAlertRecords[0].State != subscriptionAlertStateExpired || notifications.SubscriptionAlertRecords[0].Acknowledged {
+		t.Fatalf("expired transition should reopen the alert = %+v", notifications.SubscriptionAlertRecords)
+	}
+	notifications.DismissedAlertKeys = append(notifications.DismissedAlertKeys, subscriptionExpiredAlertKey(subscription.ID))
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{}, []config.DogeSubscription{subscription}, now.Add(time.Minute))
+	if len(notifications.SubscriptionAlertRecords) != 1 || !notifications.SubscriptionAlertRecords[0].Acknowledged {
+		t.Fatalf("dismissed expired subscription should retain an acknowledged record = %+v", notifications.SubscriptionAlertRecords)
+	}
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{}, nil, now.Add(2*time.Minute))
+	if len(notifications.SubscriptionAlertRecords) != 0 {
+		t.Fatalf("upstream removal should clear the expired subscription record = %+v", notifications.SubscriptionAlertRecords)
+	}
+
+	belowThreshold := subscription
+	belowThreshold.ID = 22
+	belowThreshold.AmountTotal = 400000
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{}, []config.DogeSubscription{belowThreshold}, now)
+	if len(notifications.SubscriptionAlertRecords) != 0 {
+		t.Fatalf("expired subscription at or below threshold should stay silent = %+v", notifications.SubscriptionAlertRecords)
+	}
+}
+
+func TestQuotaAlertThresholdUsesStrictlyLessThan(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	notifications := config.DogeNotificationState{
+		BalanceAlertEnabled: true, BalanceAlertThresholdUSD: 1,
+		SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: 1,
+	}
+	reconcileDogeQuotaAlertRecords(&notifications, config.DogeAccount{ID: 7, Quota: 500000}, []config.DogeSubscription{{
+		ID: 9, Status: "active", AmountTotal: 500000, EndTime: now.Add(time.Hour).Unix(),
+	}}, now)
+	if len(notifications.BalanceAlertRecords) != 0 || len(notifications.SubscriptionAlertRecords) != 0 {
+		t.Fatalf("amount equal to threshold must not alert: balance=%+v subscription=%+v", notifications.BalanceAlertRecords, notifications.SubscriptionAlertRecords)
+	}
+}
+
+func TestFilterDogeSubscriptionsForStorageUsesUpstreamSnapshotAndSevenDayRetention(t *testing.T) {
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	filtered := filterDogeSubscriptionsForStorage([]config.DogeSubscription{
+		{ID: 20, Status: "active", EndTime: now.Add(time.Hour).Unix()},
+		{ID: 21, Status: "active", EndTime: now.Add(-7 * 24 * time.Hour).Unix()},
+		{ID: 22, Status: "expired", EndTime: now.Add(-7*24*time.Hour - time.Second).Unix()},
+		{ID: 23, Status: "disabled", EndTime: now.Add(time.Hour).Unix()},
+	}, now)
+	if len(filtered) != 2 || filtered[0].ID != 20 || filtered[1].ID != 21 || filtered[1].Status != subscriptionAlertStateExpired {
+		t.Fatalf("stored subscription lifecycle = %+v", filtered)
+	}
+	if omitted := filterDogeSubscriptionsForStorage(nil, now); len(omitted) != 0 {
+		t.Fatalf("an upstream omission must not restore an old local subscription: %+v", omitted)
+	}
+}
+
+func TestAnnouncementMergePreservesSubscriptionDismissalKeys(t *testing.T) {
+	notifications := config.DogeNotificationState{
+		Initialized:        true,
+		DismissedAlertKeys: []string{subscriptionExpiredAlertKey(21), announcementAlertKey(10)},
+	}
+	snapshot := dogeAnnouncementSnapshot{Status: dogeStatusResponse{AnnouncementsEnabled: true, Announcements: []config.DogeAnnouncement{{ID: 10}}}}
+	merged := mergeDogeAnnouncementState(notifications, snapshot)
+	if !containsString(merged.DismissedAlertKeys, subscriptionExpiredAlertKey(21)) {
+		t.Fatalf("announcement merge removed subscription state: %v", merged.DismissedAlertKeys)
 	}
 }
 

@@ -5,14 +5,26 @@
  * @Project       : CodexRelay
  * @Description   : 右下角提醒窗口状态读取与确认交互
  * @File          : 独立提醒窗口脚本
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
-import { DismissDogeNotification, DismissDogeTokenSwitch, GetState, SwitchDogeToken } from "./api.js";
+import { DismissDogeNotification, DismissDogeTokenSwitch, GetState, SwitchToken } from "./api.js";
 import { renderAnnouncementMarkdown } from "./announcement-markdown.js";
+import { registerExternalLinkHandler } from "./external-links.js";
 import * as wails from "/wails/runtime.js";
 
-const kind = new URLSearchParams(window.location.search).get("kind") || "announcement";
+const search = new URLSearchParams(window.location.search);
+const kind = search.get("kind") || "announcement";
+const category = search.get("category") || "";
 const $ = (id) => document.getElementById(id);
 let switchPrompt = null;
+
+registerExternalLinkHandler((error) => {
+  const message = error?.message || String(error || "外部链接打开失败");
+  const status = $("notificationStatus");
+  status.textContent = message;
+  status.hidden = false;
+});
 
 function setButtonLoading(button, loading, label = "") {
   if (!button) return;
@@ -46,12 +58,6 @@ function setButtonLoading(button, loading, label = "") {
   button.disabled = false;
 }
 
-function formatRatio(value) {
-  const ratio = Number(value);
-  if (!Number.isFinite(ratio) || ratio <= 0) return "未知";
-  return ratio.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-}
-
 function renderTokenSwitch(prompt) {
   switchPrompt = prompt || null;
   const panel = $("tokenSwitchPanel");
@@ -59,36 +65,72 @@ function renderTokenSwitch(prompt) {
   const dismiss = $("dismissNotification");
   const actions = $("tokenSwitchActions");
   const title = $("notificationTitle");
-  panel.hidden = !prompt;
-  rows.hidden = true;
-  dismiss.hidden = true;
-  actions.hidden = !prompt;
-  title.textContent = "令牌切换提醒";
+  const auto = prompt?.mode === "auto" || Boolean(prompt?.switchedToName);
+  const label = $("tokenSwitchLabel");
   const select = $("tokenSwitchCandidates");
   const status = $("tokenSwitchStatus");
   const message = $("tokenSwitchMessage");
+  const stopPanel = $("tokenStopPanel");
+  const stopMessage = $("tokenStopMessage");
+  const historyPanel = $("tokenSwitchHistory");
+  const historyRows = $("tokenSwitchHistoryRows");
+  setButtonLoading($("cancelTokenSwitch"), false);
+  setButtonLoading($("confirmTokenSwitch"), false);
+  setButtonLoading(dismiss, false);
+  $("cancelTokenSwitch").disabled = false;
+  dismiss.disabled = false;
+  panel.hidden = !prompt;
+  rows.hidden = true;
+  const stopped = auto && Boolean(prompt?.stopped);
+  dismiss.hidden = !prompt || (!auto && !stopped);
+  actions.hidden = !prompt || auto || stopped;
+  title.textContent = stopped ? "自动切换已停止" : (auto ? "已自动切换令牌" : "令牌切换提醒");
+  stopPanel.hidden = !stopped;
+  stopMessage.textContent = prompt?.stopMessage || "当前类别暂无可用令牌，已停止自动切换。";
+  label.hidden = auto || stopped;
+  select.hidden = auto || stopped;
+  status.hidden = auto || stopped;
   select.replaceChildren();
   message.textContent = prompt?.message || "当前令牌连续异常，建议尝试切换其他令牌。";
   status.textContent = "";
+  historyRows.replaceChildren();
+  const history = prompt?.switchHistory || [];
+  historyPanel.hidden = history.length === 0;
+  for (const item of history) {
+    const row = document.createElement("article");
+    row.className = "token-switch-history-row";
+    const route = document.createElement("strong");
+    const hasTarget = Boolean(String(item.toName || "").trim());
+    route.textContent = hasTarget ? `${item.fromName || "当前令牌"} → ${item.toName}` : (item.fromName || "当前令牌");
+    const date = document.createElement("span");
+    date.textContent = `${hasTarget ? "切换时间" : "故障时间"}：${item.switchedAt || "未知"}`;
+    const error = document.createElement("span");
+    error.textContent = `错误信息：${item.failureMessage || "上游请求异常"}`;
+    row.append(route, date, error);
+    historyRows.appendChild(row);
+  }
   const candidates = (prompt?.candidates || []).filter((candidate) => candidate.selectable !== false);
   for (const candidate of candidates) {
     const option = document.createElement("option");
-    option.value = String(candidate.tokenId);
-    const name = candidate.name || `令牌 ${candidate.tokenId}`;
-    const group = candidate.group || "未知分组";
-    option.textContent = `${name}(${group} · ${formatRatio(candidate.ratio)})`;
+    option.value = String(candidate.profileId || "");
+    const name = candidate.name || "候选代理 API";
+    option.textContent = name;
     select.appendChild(option);
   }
-  select.disabled = candidates.length === 0;
-  $("confirmTokenSwitch").disabled = candidates.length === 0;
-  if (prompt && candidates.length === 0) {
+  select.disabled = auto || stopped || candidates.length === 0;
+  $("confirmTokenSwitch").disabled = candidates.length === 0 || stopped;
+  if (!auto && prompt && candidates.length === 0) {
     status.textContent = "当前类别没有可用的其他令牌";
   }
 }
 
 function render(state) {
+  const notificationStatus = $("notificationStatus");
+  notificationStatus.textContent = "";
+  notificationStatus.hidden = true;
   if (kind === "token-switch") {
-    renderTokenSwitch(state?.doge?.tokenSwitch || null);
+    const prompts = state?.doge?.tokenSwitches || {};
+    renderTokenSwitch((category ? prompts[category] : null) || (!category ? state?.doge?.tokenSwitch : null) || null);
     return;
   }
   switchPrompt = null;
@@ -138,14 +180,14 @@ $("cancelTokenSwitch").addEventListener("click", async () => {
 
 $("confirmTokenSwitch").addEventListener("click", async () => {
   if (!switchPrompt?.key) return;
-  const tokenID = Number($("tokenSwitchCandidates").value);
-  if (!Number.isSafeInteger(tokenID) || tokenID <= 0) return;
+  const profileID = String($("tokenSwitchCandidates").value || "").trim();
+  if (!profileID) return;
   const button = $("confirmTokenSwitch");
   setButtonLoading(button, true, "切换中...");
   $("cancelTokenSwitch").disabled = true;
   $("tokenSwitchStatus").textContent = "切换中...";
   try {
-    await SwitchDogeToken(switchPrompt.key, tokenID);
+    await SwitchToken(switchPrompt.key, profileID);
     await loadState();
   } catch (error) {
     $("tokenSwitchStatus").textContent = error?.message || String(error || "切换失败");
@@ -161,7 +203,10 @@ async function loadState() {
 $("dismissNotification").addEventListener("click", async () => {
   const button = $("dismissNotification");
   setButtonLoading(button, true, "关闭中...");
-  try { await DismissDogeNotification(kind); } finally { setButtonLoading(button, false); }
+  try {
+    if (kind === "token-switch" && switchPrompt?.key) await DismissDogeTokenSwitch(switchPrompt.key);
+    else await DismissDogeNotification(kind);
+  } finally { setButtonLoading(button, false); }
 });
 wails.Events.On("notification-state-changed", loadState);
 loadState();

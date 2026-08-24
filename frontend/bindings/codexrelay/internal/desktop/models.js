@@ -95,6 +95,13 @@ export class DesktopState {
              */
             this["profiles"] = [];
         }
+        if (!("failoverOrder" in $$source)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string[] }}
+             */
+            this["failoverOrder"] = {};
+        }
         if (!("clientConfigs" in $$source)) {
             /**
              * @member
@@ -144,6 +151,13 @@ export class DesktopState {
              */
             this["preferences"] = (new config$0.Preferences());
         }
+        if (!("tokenSwitch" in $$source)) {
+            /**
+             * @member
+             * @type {config$0.TokenSwitchSettings}
+             */
+            this["tokenSwitch"] = (new config$0.TokenSwitchSettings());
+        }
         if (!("doge" in $$source)) {
             /**
              * @member
@@ -165,12 +179,14 @@ export class DesktopState {
         const $$createField8_0 = $$createType0;
         const $$createField9_0 = $$createType2;
         const $$createField10_0 = $$createType4;
-        const $$createField11_0 = $$createType5;
-        const $$createField12_0 = $$createType6;
+        const $$createField11_0 = $$createType6;
+        const $$createField12_0 = $$createType7;
         const $$createField13_0 = $$createType8;
-        const $$createField14_0 = $$createType9;
-        const $$createField16_0 = $$createType10;
-        const $$createField17_0 = $$createType11;
+        const $$createField14_0 = $$createType10;
+        const $$createField15_0 = $$createType11;
+        const $$createField17_0 = $$createType12;
+        const $$createField18_0 = $$createType13;
+        const $$createField19_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("proxyUrls" in $$parsedSource) {
             $$parsedSource["proxyUrls"] = $$createField6_0($$parsedSource["proxyUrls"]);
@@ -181,26 +197,32 @@ export class DesktopState {
         if ("profiles" in $$parsedSource) {
             $$parsedSource["profiles"] = $$createField9_0($$parsedSource["profiles"]);
         }
+        if ("failoverOrder" in $$parsedSource) {
+            $$parsedSource["failoverOrder"] = $$createField10_0($$parsedSource["failoverOrder"]);
+        }
         if ("clientConfigs" in $$parsedSource) {
-            $$parsedSource["clientConfigs"] = $$createField10_0($$parsedSource["clientConfigs"]);
+            $$parsedSource["clientConfigs"] = $$createField11_0($$parsedSource["clientConfigs"]);
         }
         if ("network" in $$parsedSource) {
-            $$parsedSource["network"] = $$createField11_0($$parsedSource["network"]);
+            $$parsedSource["network"] = $$createField12_0($$parsedSource["network"]);
         }
         if ("systemProxy" in $$parsedSource) {
-            $$parsedSource["systemProxy"] = $$createField12_0($$parsedSource["systemProxy"]);
+            $$parsedSource["systemProxy"] = $$createField13_0($$parsedSource["systemProxy"]);
         }
         if ("requests" in $$parsedSource) {
-            $$parsedSource["requests"] = $$createField13_0($$parsedSource["requests"]);
+            $$parsedSource["requests"] = $$createField14_0($$parsedSource["requests"]);
         }
         if ("usage" in $$parsedSource) {
-            $$parsedSource["usage"] = $$createField14_0($$parsedSource["usage"]);
+            $$parsedSource["usage"] = $$createField15_0($$parsedSource["usage"]);
         }
         if ("preferences" in $$parsedSource) {
-            $$parsedSource["preferences"] = $$createField16_0($$parsedSource["preferences"]);
+            $$parsedSource["preferences"] = $$createField17_0($$parsedSource["preferences"]);
+        }
+        if ("tokenSwitch" in $$parsedSource) {
+            $$parsedSource["tokenSwitch"] = $$createField18_0($$parsedSource["tokenSwitch"]);
         }
         if ("doge" in $$parsedSource) {
-            $$parsedSource["doge"] = $$createField17_0($$parsedSource["doge"]);
+            $$parsedSource["doge"] = $$createField19_0($$parsedSource["doge"]);
         }
         return new DesktopState(/** @type {Partial<DesktopState>} */($$parsedSource));
     }
@@ -310,6 +332,41 @@ export class DogeState {
              */
             this["tokenSwitch"] = undefined;
         }
+        if (!("tokenSwitches" in $$source)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: PublicDogeTokenSwitchPrompt | null }}
+             */
+            this["tokenSwitches"] = {};
+        }
+        if (!("balanceAlertEnabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["balanceAlertEnabled"] = false;
+        }
+        if (!("balanceAlertThresholdUsd" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["balanceAlertThresholdUsd"] = 0;
+        }
+        if (!("subscriptionAlertEnabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["subscriptionAlertEnabled"] = false;
+        }
+        if (!("subscriptionAlertThresholdUsd" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["subscriptionAlertThresholdUsd"] = 0;
+        }
         if (!("syncing" in $$source)) {
             /**
              * @member
@@ -362,13 +419,14 @@ export class DogeState {
      * @returns {DogeState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType12;
-        const $$createField3_0 = $$createType13;
-        const $$createField7_0 = $$createType15;
-        const $$createField10_0 = $$createType16;
-        const $$createField11_0 = $$createType18;
-        const $$createField12_0 = $$createType19;
-        const $$createField13_0 = $$createType21;
+        const $$createField2_0 = $$createType15;
+        const $$createField3_0 = $$createType16;
+        const $$createField7_0 = $$createType18;
+        const $$createField10_0 = $$createType3;
+        const $$createField11_0 = $$createType20;
+        const $$createField12_0 = $$createType21;
+        const $$createField13_0 = $$createType23;
+        const $$createField14_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("account" in $$parsedSource) {
             $$parsedSource["account"] = $$createField2_0($$parsedSource["account"]);
@@ -390,6 +448,9 @@ export class DogeState {
         }
         if ("tokenSwitch" in $$parsedSource) {
             $$parsedSource["tokenSwitch"] = $$createField13_0($$parsedSource["tokenSwitch"]);
+        }
+        if ("tokenSwitches" in $$parsedSource) {
+            $$parsedSource["tokenSwitches"] = $$createField14_0($$parsedSource["tokenSwitches"]);
         }
         return new DogeState(/** @type {Partial<DogeState>} */($$parsedSource));
     }
@@ -572,7 +633,7 @@ export class ProfileInput {
      */
     static createFrom($$source = {}) {
         const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType23;
+        const $$createField8_0 = $$createType26;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
@@ -876,8 +937,8 @@ export class PublicDogeNotifications {
      * @returns {PublicDogeNotifications}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType25;
-        const $$createField5_0 = $$createType27;
+        const $$createField3_0 = $$createType28;
+        const $$createField5_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("announcements" in $$parsedSource) {
             $$parsedSource["announcements"] = $$createField3_0($$parsedSource["announcements"]);
@@ -1208,6 +1269,59 @@ export class PublicDogeTokenSwitchCandidate {
 }
 
 /**
+ * PublicDogeTokenSwitchHistory 是自动轮次中的切换或最终故障记录，不包含 API 密钥或请求正文。
+ * ToName 为空表示当前令牌失败后没有可切换目标，前端应将 SwitchedAt 显示为故障时间。
+ */
+export class PublicDogeTokenSwitchHistory {
+    /**
+     * Creates a new PublicDogeTokenSwitchHistory instance.
+     * @param {Partial<PublicDogeTokenSwitchHistory>} [$$source = {}] - The source object to create the PublicDogeTokenSwitchHistory.
+     */
+    constructor($$source = {}) {
+        if (!("fromName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["fromName"] = "";
+        }
+        if (!("toName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["toName"] = "";
+        }
+        if (!("switchedAt" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["switchedAt"] = "";
+        }
+        if (!("failureMessage" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["failureMessage"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PublicDogeTokenSwitchHistory instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PublicDogeTokenSwitchHistory}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PublicDogeTokenSwitchHistory(/** @type {Partial<PublicDogeTokenSwitchHistory>} */($$parsedSource));
+    }
+}
+
+/**
  * PublicDogeTokenSwitchPrompt 是右下角令牌切换弹窗的只读状态。
  */
 export class PublicDogeTokenSwitchPrompt {
@@ -1230,6 +1344,13 @@ export class PublicDogeTokenSwitchPrompt {
              */
             this["category"] = "";
         }
+        if (!("mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["mode"] = "";
+        }
         if (!("failureKind" in $$source)) {
             /**
              * @member
@@ -1251,12 +1372,26 @@ export class PublicDogeTokenSwitchPrompt {
              */
             this["failureStatus"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["failureWindowMinutes"] = undefined;
+        }
         if (!("currentTokenId" in $$source)) {
             /**
              * @member
              * @type {number}
              */
             this["currentTokenId"] = 0;
+        }
+        if (!("currentProfileId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["currentProfileId"] = "";
         }
         if (!("currentName" in $$source)) {
             /**
@@ -1286,12 +1421,47 @@ export class PublicDogeTokenSwitchPrompt {
              */
             this["message"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["switchedToName"] = undefined;
+        }
         if (!("candidates" in $$source)) {
             /**
              * @member
              * @type {PublicDogeTokenSwitchCandidate[]}
              */
             this["candidates"] = [];
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {PublicDogeTokenSwitchHistory[] | undefined}
+             */
+            this["switchHistory"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["stopped"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["stoppedAt"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["stopMessage"] = undefined;
         }
 
         Object.assign(this, $$source);
@@ -1303,10 +1473,14 @@ export class PublicDogeTokenSwitchPrompt {
      * @returns {PublicDogeTokenSwitchPrompt}
      */
     static createFrom($$source = {}) {
-        const $$createField10_0 = $$createType29;
+        const $$createField14_0 = $$createType32;
+        const $$createField15_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("candidates" in $$parsedSource) {
-            $$parsedSource["candidates"] = $$createField10_0($$parsedSource["candidates"]);
+            $$parsedSource["candidates"] = $$createField14_0($$parsedSource["candidates"]);
+        }
+        if ("switchHistory" in $$parsedSource) {
+            $$parsedSource["switchHistory"] = $$createField15_0($$parsedSource["switchHistory"]);
         }
         return new PublicDogeTokenSwitchPrompt(/** @type {Partial<PublicDogeTokenSwitchPrompt>} */($$parsedSource));
     }
@@ -1461,6 +1635,13 @@ export class PublicProfile {
              */
             this["remoteTokenId"] = undefined;
         }
+        if (!("skipAutoSwitch" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["skipAutoSwitch"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1472,7 +1653,7 @@ export class PublicProfile {
      */
     static createFrom($$source = {}) {
         const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType31;
+        const $$createField8_0 = $$createType36;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
@@ -1614,32 +1795,37 @@ export class UpdateInfo {
 const $$createType0 = $Create.Map($Create.Any, $Create.Any);
 const $$createType1 = PublicProfile.createFrom;
 const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = clientconfig$0.PublicClientConfig.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = network$0.Settings.createFrom;
-const $$createType6 = network$0.SystemProxyInfo.createFrom;
-const $$createType7 = usage$0.RequestRecord.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = usage$0.Overview.createFrom;
-const $$createType10 = config$0.Preferences.createFrom;
-const $$createType11 = DogeState.createFrom;
-const $$createType12 = PublicDogeAccount.createFrom;
-const $$createType13 = $Create.Map($Create.Any, $Create.Any);
-const $$createType14 = PublicDogeSubscription.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = $Create.Array($Create.Any);
-const $$createType17 = PublicDogeToken.createFrom;
+const $$createType3 = $Create.Array($Create.Any);
+const $$createType4 = $Create.Map($Create.Any, $$createType3);
+const $$createType5 = clientconfig$0.PublicClientConfig.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = network$0.Settings.createFrom;
+const $$createType8 = network$0.SystemProxyInfo.createFrom;
+const $$createType9 = usage$0.RequestRecord.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = usage$0.Overview.createFrom;
+const $$createType12 = config$0.Preferences.createFrom;
+const $$createType13 = config$0.TokenSwitchSettings.createFrom;
+const $$createType14 = DogeState.createFrom;
+const $$createType15 = PublicDogeAccount.createFrom;
+const $$createType16 = $Create.Map($Create.Any, $Create.Any);
+const $$createType17 = PublicDogeSubscription.createFrom;
 const $$createType18 = $Create.Array($$createType17);
-const $$createType19 = PublicDogeNotifications.createFrom;
-const $$createType20 = PublicDogeTokenSwitchPrompt.createFrom;
-const $$createType21 = $Create.Nullable($$createType20);
-const $$createType22 = ModelInput.createFrom;
-const $$createType23 = $Create.Array($$createType22);
-const $$createType24 = PublicDogeAnnouncement.createFrom;
-const $$createType25 = $Create.Array($$createType24);
-const $$createType26 = PublicDogeAlert.createFrom;
-const $$createType27 = $Create.Array($$createType26);
-const $$createType28 = PublicDogeTokenSwitchCandidate.createFrom;
-const $$createType29 = $Create.Array($$createType28);
-const $$createType30 = PublicModel.createFrom;
-const $$createType31 = $Create.Array($$createType30);
+const $$createType19 = PublicDogeToken.createFrom;
+const $$createType20 = $Create.Array($$createType19);
+const $$createType21 = PublicDogeNotifications.createFrom;
+const $$createType22 = PublicDogeTokenSwitchPrompt.createFrom;
+const $$createType23 = $Create.Nullable($$createType22);
+const $$createType24 = $Create.Map($Create.Any, $$createType23);
+const $$createType25 = ModelInput.createFrom;
+const $$createType26 = $Create.Array($$createType25);
+const $$createType27 = PublicDogeAnnouncement.createFrom;
+const $$createType28 = $Create.Array($$createType27);
+const $$createType29 = PublicDogeAlert.createFrom;
+const $$createType30 = $Create.Array($$createType29);
+const $$createType31 = PublicDogeTokenSwitchCandidate.createFrom;
+const $$createType32 = $Create.Array($$createType31);
+const $$createType33 = PublicDogeTokenSwitchHistory.createFrom;
+const $$createType34 = $Create.Array($$createType33);
+const $$createType35 = PublicModel.createFrom;
+const $$createType36 = $Create.Array($$createType35);

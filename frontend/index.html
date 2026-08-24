@@ -25,6 +25,9 @@
           <div><h1>CodexRelay</h1><span id="version" class="version"></span></div>
         </div>
         <div class="toolbar-actions">
+          <button id="pendingDogeImport" class="pending-import-button hidden" type="button" title="选择待导入令牌的分组">
+            <span class="icon icon-download" aria-hidden="true"></span><span>待导入</span><strong id="pendingDogeImportCount">0</strong>
+          </button>
           <div id="dogeQuotaWrap" class="doge-quota-wrap">
             <button id="dogeQuotaSummary" class="doge-quota-summary" type="button" aria-expanded="false" aria-controls="dogeQuotaPopover">
               <span class="doge-quota-caption">二狗子余额</span><strong id="dogeQuotaTotal">$0.00</strong>
@@ -64,7 +67,7 @@
             <div class="filter-row"><span class="filter-label">来源</span><div class="filter-options" data-filter-group="source" role="tablist" aria-label="来源筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="doge">二狗子</button><button class="filter-option" type="button" data-filter-value="custom">自定义</button></div></div>
             <div class="filter-row"><span class="filter-label">类别</span><div class="filter-options" data-filter-group="category" role="tablist" aria-label="类别筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="codex">Codex</button><button class="filter-option" type="button" data-filter-value="claude">Claude</button><button class="filter-option" type="button" data-filter-value="gemini">Gemini</button><button class="filter-option" type="button" data-filter-value="grok">Grok</button><button class="filter-option" type="button" data-filter-value="opencode">OpenCode</button><button class="filter-option" type="button" data-filter-value="openclaw">OpenClaw</button><button class="filter-option" type="button" data-filter-value="hermes">Hermes</button><button class="filter-option" type="button" data-filter-value="image">生图</button><button class="filter-option" type="button" data-filter-value="other">其他</button></div></div>
           </div>
-          <div class="active-summary" aria-label="已启用代理 API 数量"><span>已启用</span><strong id="activeCount">0/9</strong></div>
+          <div class="active-summary" aria-label="当前启用状态"><div class="active-count-line"><span>已启用</span><strong id="activeCount">0/9</strong></div><span id="failoverStatus" class="failover-status">模式：手动提示</span></div>
         </div>
         <div id="profileList" class="profile-list"></div>
         <div id="emptyProfiles" class="empty-state hidden">
@@ -148,16 +151,53 @@
             <label class="setting-row"><span><strong>开机启动</strong><small>登录 Windows 后启动 CodexRelay</small></span><input id="launchAtStartup" class="switch-input" type="checkbox"></label>
             <label class="setting-row"><span><strong>开机启动时隐藏</strong><small>仅由 Windows 开机自启动时直接进入系统托盘</small></span><input id="startHidden" class="switch-input" type="checkbox"></label>
           </div>
-          <section class="settings-section homepage-settings">
-            <div class="section-heading"><div><h3>主页显示</h3><p>隐藏类别只影响主页展示，不会删除本地配置，也不会停止代理服务。</p></div></div>
-            <div id="visibleCategories" class="setting-list category-visibility-list"></div>
+          <section class="settings-section failover-settings">
+            <div class="section-heading"><div><span class="panel-kicker">请求故障</span><h3>令牌异常处理</h3><p>二狗子和自定义 API 在当前类别列表中共用同一切换顺序。</p></div></div>
+            <div class="failover-setting-card">
+              <div class="failover-card-header">
+                <span><strong>令牌异常触发条件</strong><small>选中的故障达到下方阈值后，按右侧方式处理</small></span>
+                <div id="tokenSwitchMode" class="segmented mode-segmented failover-mode-control" role="group" aria-label="令牌异常处理方式"><button type="button" data-mode="auto">自动切换</button><button type="button" data-mode="prompt">手动提示</button></div>
+              </div>
+              <div class="compact-option-grid trigger-option-grid">
+                <label class="compact-check-option"><input id="trigger401" type="checkbox"><span>HTTP 401</span></label>
+                <label class="compact-check-option"><input id="trigger403" type="checkbox"><span>HTTP 403</span></label>
+                <label class="compact-check-option"><input id="trigger5xx" type="checkbox"><span>HTTP 5XX</span></label>
+                <label class="compact-check-option"><input id="triggerNetwork" type="checkbox"><span>连接异常</span></label>
+                <label class="compact-check-option"><input id="triggerDirectoryInvalid" type="checkbox"><span>令牌失效或被禁用</span></label>
+                <label class="compact-check-option"><input id="triggerDirectoryMissing" type="checkbox"><span>令牌从目录消失</span></label>
+              </div>
+              <div class="failover-threshold-grid">
+                <label class="failover-threshold"><span>401 / 403 连续次数</span><span class="failover-inline-control"><input id="authFailureThreshold" type="number" min="1" max="100" step="1" inputmode="numeric"><span>次</span></span></label>
+                <label class="failover-threshold"><span>5XX / 连接异常次数</span><span class="failover-inline-control"><input id="upstreamFailureThreshold" type="number" min="1" max="100" step="1" inputmode="numeric"><span>次</span></span></label>
+                <label class="failover-threshold"><span>异常统计窗口</span><span class="failover-inline-control"><input id="upstreamFailureWindowMinutes" type="number" min="1" max="1440" step="1" inputmode="numeric"><span>分钟</span></span></label>
+              </div>
+              <label class="failover-card-loop">
+                <span><strong>到达列表末尾后循环</strong><small>开启后从列表第一项继续查找可用令牌；关闭后到末尾即停止</small></span>
+                <input id="failoverLoop" class="switch-input" type="checkbox">
+              </label>
+            </div>
+            <p class="footer-note">自动切换只影响后续请求，不会重放已经失败的请求。</p>
+          </section>
+          <section class="settings-section alert-settings">
+            <div class="section-heading"><div><span class="panel-kicker">账户提醒</span><h3>余额和套餐提醒</h3><p>两个提醒可以独立关闭或设置不同阈值。</p></div></div>
+            <div class="setting-list">
+              <div class="setting-row"><span><strong>余额低于</strong><small>钱包余额低于阈值时显示提醒</small></span><div class="threshold-control"><span>$</span><input id="balanceAlertThresholdUSD" type="number" min="0.01" step="0.01" inputmode="decimal"><input id="balanceAlertEnabled" class="switch-input" type="checkbox" aria-label="启用余额提醒"></div></div>
+              <div class="setting-row"><span><strong>套餐剩余低于</strong><small>有效套餐剩余额度低于阈值时显示提醒</small></span><div class="threshold-control"><span>$</span><input id="subscriptionAlertThresholdUSD" type="number" min="0.01" step="0.01" inputmode="decimal"><input id="subscriptionAlertEnabled" class="switch-input" type="checkbox" aria-label="启用套餐提醒"></div></div>
+            </div>
           </section>
           <section class="settings-section homepage-settings">
-            <div class="section-heading"><div><h3>默认视图</h3><p>设置主程序启动和恢复窗口时使用的主页筛选条件。</p></div></div>
-            <div class="preference-selects">
-              <label class="field"><span>主程序默认来源</span><select id="defaultSource"><option value="">全部来源</option><option value="doge">二狗子</option><option value="custom">自定义</option></select></label>
-              <label class="field"><span>主程序默认类别</span><select id="defaultCategory"><option value="">全部类别</option><option value="codex">Codex</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="opencode">OpenCode</option><option value="openclaw">OpenClaw</option><option value="hermes">Hermes</option><option value="image">生图</option><option value="other">其他</option></select></label>
-              <label class="field"><span>恢复窗口时显示</span><select id="restoreViewMode"><option value="current">当前视图</option><option value="default">默认视图</option></select></label>
+            <div class="section-heading"><div><h3>主页显示</h3><p>隐藏类别只影响主页展示，不会删除本地配置，也不会停止代理服务。</p></div></div>
+            <div class="homepage-setting-card">
+              <div class="homepage-card-header"><span><strong>主页显示类别</strong><small>选择需要在主页类别筛选和令牌列表中显示的类别</small></span></div>
+              <div id="visibleCategories" class="compact-option-grid category-visibility-grid"></div>
+              <div class="homepage-default-view">
+                <span class="homepage-default-copy"><strong>默认视图</strong><small>设置主程序启动和恢复窗口时使用的主页筛选条件</small></span>
+                <div class="preference-selects">
+                  <label class="field"><span>主程序默认来源</span><select id="defaultSource"><option value="">全部</option><option value="doge">二狗子</option><option value="custom">自定义</option></select></label>
+                  <label class="field"><span>主程序默认类别</span><select id="defaultCategory"><option value="">全部类别</option><option value="codex">Codex</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="opencode">OpenCode</option><option value="openclaw">OpenClaw</option><option value="hermes">Hermes</option><option value="image">生图</option><option value="other">其他</option></select></label>
+                  <label class="field"><span>恢复窗口时显示</span><select id="restoreViewMode"><option value="current">当前视图</option><option value="default">默认视图</option></select></label>
+                </div>
+              </div>
             </div>
           </section>
         </div>

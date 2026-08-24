@@ -21,6 +21,8 @@ import * as network$0 from "../network/models.js";
 import * as $models from "./models.js";
 
 /**
+ * ActivateProfile 启用指定 Profile；二狗子来源必须仍存在于最新目录且当前分组可用。
+ * 成功后清理原活动 Profile 的失败统计，新请求立即读取新的运行时快照。
  * @param {string} id
  * @returns {$CancellablePromise<void>}
  */
@@ -92,7 +94,9 @@ export function DeleteProfile(id) {
 }
 
 /**
- * DismissDogeNotification 确认一个提醒类别；同类余额或套餐提醒一次性关闭，公告按当前未读项关闭。
+ * DismissDogeNotification 一次确认当前类别窗口中的全部内容。
+ * 余额和套餐都只标记当前状态；过期套餐同样保留按套餐 ID 的已确认记录，避免后续同步重复提醒。
+ * 公告仍使用原有的已读状态，避免公告提醒与额度状态混用。
  * @param {string} kind
  * @returns {$CancellablePromise<void>}
  */
@@ -183,6 +187,17 @@ export function OpenDogeTopup() {
 }
 
 /**
+ * OpenExternalURL 使用系统默认浏览器打开前端传入的外部 HTTP(S) 地址。
+ * URL 的协议和主机校验由 platform.OpenURL 统一执行，避免 WebView 在应用内处理外链，
+ * 也避免把任意协议交给操作系统。
+ * @param {string} raw
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenExternalURL(raw) {
+    return $Call.ByID(2419338323, raw);
+}
+
+/**
  * RedeemDoge 使用当前绑定令牌兑换额度；兑换成功后重新同步用户、套餐和购买配置。
  * 兑换码只存在于本次请求体和上游调用栈，不写入配置、日志或返回状态。
  * @param {string} code
@@ -203,6 +218,17 @@ export function ReorderDogeTokens(orderKeys) {
 }
 
 /**
+ * ReorderFailoverProfiles 保存指定类别的统一 Profile 顺序；来源不同的 Profile 可以在同一列表中相邻排列。
+ * 前端只提交当前视图中的 Profile ID，后端保留未显示项并拒绝跨类别或未知 ID。
+ * @param {string} category
+ * @param {string[]} ids
+ * @returns {$CancellablePromise<void>}
+ */
+export function ReorderFailoverProfiles(category, ids) {
+    return $Call.ByID(3757833444, category, ids);
+}
+
+/**
  * @param {string[]} ids
  * @returns {$CancellablePromise<void>}
  */
@@ -211,6 +237,8 @@ export function ReorderProfiles(ids) {
 }
 
 /**
+ * SaveProfile 新增或更新一个本地 Profile，并规范化其类别故障顺序。
+ * 保存成功后重新评估正在进行的自动轮次，使新 Profile 可以成为目录异常后的实时候选。
  * @param {$models.ProfileInput} input
  * @returns {$CancellablePromise<void>}
  */
@@ -258,6 +286,16 @@ export function SetDataDirectory(directory) {
 }
 
 /**
+ * SetDogeAlertSettings 保存余额和套餐提醒的独立开关与美元阈值。
+ * 关闭提醒不会删除已同步的余额、套餐或公告数据，只是不再生成对应右下角提醒。
+ * @param {config$0.DogeAlertSettings} input
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetDogeAlertSettings(input) {
+    return $Call.ByID(2204274041, input);
+}
+
+/**
  * @param {number} minutes
  * @returns {$CancellablePromise<void>}
  */
@@ -266,8 +304,8 @@ export function SetDogeSyncInterval(minutes) {
 }
 
 /**
- * SetDogeTokenCategories 保存用户为尚未导入令牌选择的本地 API 类别；远端 group 仍用于权限判断，display_name 只作为界面文案。
- * 已经导入的令牌不能通过该入口改类别，避免绕过编辑页导致启用映射与配置不一致。
+ * SetDogeTokenCategories 校验整批选择后，将待导入令牌一次性创建为本地 Profile。
+ * 新 Profile 按本批选择顺序追加到所属类别末尾；整批任一项无效时不保存部分结果。
  * @param {$models.DogeTokenCategoryInput[]} assignments
  * @returns {$CancellablePromise<void>}
  */
@@ -292,6 +330,16 @@ export function SetPreferences(input) {
 }
 
 /**
+ * SetProfileAutoSwitch 设置单个 Profile 是否参加自动故障切换；手动提示模式仍可选择该 Profile。
+ * @param {string} id
+ * @param {boolean} enabled
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetProfileAutoSwitch(id, enabled) {
+    return $Call.ByID(1862834343, id, enabled);
+}
+
+/**
  * SetProxyPort 校验并热切换本地代理监听端口；新端口无法绑定时不修改配置和现有监听。
  * 端口范围为 TCP 的 1-65535；成功后新请求地址立即使用新端口，已有连接由旧服务优雅退出。
  * @param {number} port
@@ -302,14 +350,34 @@ export function SetProxyPort(port) {
 }
 
 /**
- * SwitchDogeToken 在服务端重新校验提示、类别和可用状态后启用候选令牌。
- * 前端只提交运行时提示 key 与远端令牌 ID，不能借此切换到其他类别或不可用令牌。
+ * SetTokenSwitchSettings 保存所有来源共用的故障触发、阈值和候选循环策略。
+ * 关闭或重新开启某个错误类型会清理其旧统计；阈值、窗口和模式变化则基于仍有效的其他统计重新评估。
+ * @param {config$0.TokenSwitchSettings} input
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetTokenSwitchSettings(input) {
+    return $Call.ByID(2021288413, input);
+}
+
+/**
+ * SwitchDogeToken 保留旧绑定入口；实际切换已提升为所有来源共用的 Profile 切换。
  * @param {string} key
  * @param {number} tokenID
  * @returns {$CancellablePromise<void>}
  */
 export function SwitchDogeToken(key, tokenID) {
     return $Call.ByID(3647092161, key, tokenID);
+}
+
+/**
+ * SwitchToken 在服务端重新校验提示、类别、顺序和可用状态后启用候选 Profile。
+ * 前端只提交运行时提示 key 与 Profile ID，不能借此切换到其他类别或不可用 Profile。
+ * @param {string} key
+ * @param {string} profileID
+ * @returns {$CancellablePromise<void>}
+ */
+export function SwitchToken(key, profileID) {
+    return $Call.ByID(3325039250, key, profileID);
 }
 
 /**
@@ -339,6 +407,8 @@ export function TestProfile(id) {
 }
 
 /**
+ * UnbindDoge 删除绑定凭据、账户快照和全部二狗子 Profile。
+ * Profile、启用映射、故障顺序及对应运行时提示在返回前一并清理，自定义 API 和公告记录不受影响。
  * @returns {$CancellablePromise<void>}
  */
 export function UnbindDoge() {

@@ -23,6 +23,9 @@ func Validate(cfg AppConfig) error {
 	if err := ValidatePreferences(cfg.Preferences); err != nil {
 		return err
 	}
+	if err := ValidateTokenSwitch(cfg.TokenSwitch); err != nil {
+		return err
+	}
 	if !strings.HasPrefix(cfg.LocalAccessToken, "sk-") {
 		return errors.New("本地访问令牌必须以 sk- 开头")
 	}
@@ -72,6 +75,57 @@ func Validate(cfg AppConfig) error {
 	for category := range cfg.ClientConfigs {
 		if !IsCategory(category) {
 			return fmt.Errorf("客户端配置包含未知 API 类别 %q", category)
+		}
+	}
+	if err := ValidateFailoverOrder(cfg.FailoverOrder, cfg.Profiles); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateTokenSwitch 校验通用故障切换模式、触发阈值和时间窗口。
+func ValidateTokenSwitch(settings TokenSwitchSettings) error {
+	if settings.Mode != TokenSwitchModePrompt && settings.Mode != TokenSwitchModeAuto {
+		return fmt.Errorf("令牌异常处理方式无效: %q", settings.Mode)
+	}
+	if settings.AuthFailureThreshold < 1 {
+		return errors.New("401/403 连续失败次数必须大于 0")
+	}
+	if settings.UpstreamFailureThreshold < 1 {
+		return errors.New("5XX/连接异常累计次数必须大于 0")
+	}
+	if settings.UpstreamFailureWindowMinutes < 1 {
+		return errors.New("5XX/连接异常统计窗口必须大于 0 分钟")
+	}
+	return nil
+}
+
+// ValidateFailoverOrder 校验按类别保存的 Profile 顺序；顺序只引用同类别的本地 Profile。
+func ValidateFailoverOrder(order map[string][]string, profiles []Profile) error {
+	if order == nil {
+		return errors.New("failoverOrder 必须是 JSON 对象")
+	}
+	byID := make(map[string]Profile, len(profiles))
+	for _, profile := range profiles {
+		byID[profile.ID] = profile
+	}
+	for category, ids := range order {
+		if !IsCategory(category) {
+			return fmt.Errorf("令牌切换顺序包含未知类别 %q", category)
+		}
+		seen := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
+				return fmt.Errorf("类别 %q 的令牌切换顺序包含无效 Profile ID", category)
+			}
+			if _, ok := seen[id]; ok {
+				return fmt.Errorf("类别 %q 的令牌切换顺序包含重复 Profile ID %q", category, id)
+			}
+			profile, ok := byID[id]
+			if !ok || profile.Category != category {
+				return fmt.Errorf("类别 %q 的令牌切换顺序包含未知或跨类别 Profile %q", category, id)
+			}
+			seen[id] = struct{}{}
 		}
 	}
 	return nil
@@ -129,6 +183,9 @@ func ValidateDoge(connection DogeConnection) error {
 	}
 	if !IsDogeSyncInterval(connection.SyncIntervalMinutes) {
 		return errors.New("二狗子同步间隔必须是 1、3、5、10、15、30 或 60 分钟")
+	}
+	if connection.Notifications.BalanceAlertThresholdUSD <= 0 || connection.Notifications.SubscriptionAlertThresholdUSD <= 0 {
+		return errors.New("余额和套餐提醒阈值必须大于 0")
 	}
 	if connection.Groups == nil || connection.Tokens == nil {
 		return errors.New("二狗子分组和令牌目录必须是 JSON 数组")

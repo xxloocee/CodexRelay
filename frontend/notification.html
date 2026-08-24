@@ -6,6 +6,8 @@
   @Project       : CodexRelay
   @Description   : 右下角独立提醒窗口结构
   @File          : 余额、套餐、公告和令牌切换提醒窗口
+  @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+  @Remind        : 二次开发请保留原版权信息，谢谢。
 -->
 <html lang="zh-CN">
 <head>
@@ -16,12 +18,21 @@
 </head>
 <body>
   <main id="notificationCard" class="notification-card">
-    <header class="notification-heading"><img src="/logo.png" alt=""><div><strong id="notificationTitle">CodexRelay 提醒</strong><span>二狗子账户状态</span></div></header>
+    <header class="notification-heading"><img src="/logo.png" alt=""><div><strong id="notificationTitle">CodexRelay 提醒</strong><span>账户与令牌状态</span></div></header>
+    <p id="notificationStatus" class="notification-global-status" hidden aria-live="polite"></p>
     <div id="notificationContent" class="notification-content">
       <div id="notificationRows" class="notification-rows"></div>
       <section id="tokenSwitchPanel" class="token-switch-panel" hidden>
+        <div id="tokenStopPanel" class="token-stop-panel" hidden>
+          <strong>本轮自动切换已停止</strong>
+          <span id="tokenStopMessage"></span>
+        </div>
         <p id="tokenSwitchMessage" class="token-switch-message"></p>
-        <label class="token-switch-label" for="tokenSwitchCandidates">切换到</label>
+        <section id="tokenSwitchHistory" class="token-switch-history" hidden>
+          <div class="token-switch-history-heading">切换记录</div>
+          <div id="tokenSwitchHistoryRows" class="token-switch-history-rows"></div>
+        </section>
+        <label id="tokenSwitchLabel" class="token-switch-label" for="tokenSwitchCandidates">切换到</label>
         <select id="tokenSwitchCandidates" class="token-switch-select"></select>
         <p id="tokenSwitchStatus" class="token-switch-status" aria-live="polite"></p>
       </section>

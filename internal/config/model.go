@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"codexrelay/internal/network"
@@ -24,6 +25,18 @@ const DefaultProxyPort = 8765
 
 // DefaultDogeSyncIntervalMinutes 是新配置的二狗子自动同步默认间隔。
 const DefaultDogeSyncIntervalMinutes = 3
+
+const (
+	// TokenSwitchModePrompt 在达到故障条件后显示手动切换提示。
+	TokenSwitchModePrompt = "prompt"
+	// TokenSwitchModeAuto 在达到故障条件后自动切换到候选 Profile。
+	TokenSwitchModeAuto = "auto"
+
+	DefaultAuthFailureThreshold         = 5
+	DefaultUpstreamFailureThreshold     = 5
+	DefaultUpstreamFailureWindowMinutes = 3
+	DefaultQuotaAlertThresholdUSD       = 1
+)
 
 const (
 	SourceDoge   = "doge"
@@ -74,17 +87,18 @@ type ModelEntry struct {
 }
 
 type Profile struct {
-	ID            string            `json:"id"`
-	Source        string            `json:"source"`
-	Category      string            `json:"category"`
-	Name          string            `json:"name"`
-	BaseURL       string            `json:"baseUrl"`
-	APIKey        string            `json:"apiKey"`
-	Note          string            `json:"note,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Models        []ModelEntry      `json:"models,omitempty"`
-	DefaultModel  string            `json:"defaultModel,omitempty"`
-	RemoteTokenID int64             `json:"remoteTokenId,omitempty"`
+	ID             string            `json:"id"`
+	Source         string            `json:"source"`
+	Category       string            `json:"category"`
+	Name           string            `json:"name"`
+	BaseURL        string            `json:"baseUrl"`
+	APIKey         string            `json:"apiKey"`
+	Note           string            `json:"note,omitempty"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	Models         []ModelEntry      `json:"models,omitempty"`
+	DefaultModel   string            `json:"defaultModel,omitempty"`
+	RemoteTokenID  int64             `json:"remoteTokenId,omitempty"`
+	SkipAutoSwitch bool              `json:"skipAutoSwitch,omitempty"`
 }
 
 // DogeToken 保存二狗子 New API 管理目录；Key 在绑定或手动同步时从密钥接口补全，自动同步只为新增且缺失的令牌补全。
@@ -152,16 +166,68 @@ type DogeAnnouncement struct {
 	Type        string `json:"type"`
 }
 
+// DogeBalanceAlertRecord 保存一个账户 ID 的低余额提醒状态；记录存在表示该低余额状态已经触发过提醒。
+// Acknowledged 只表示用户是否在提醒窗口点击过“我知道了”，不会改变低余额状态本身。
+type DogeBalanceAlertRecord struct {
+	AccountID    int64     `json:"accountId"`
+	AmountUSD    float64   `json:"amountUsd"`
+	ThresholdUSD float64   `json:"thresholdUsd"`
+	NotifiedAt   time.Time `json:"notifiedAt"`
+	Acknowledged bool      `json:"acknowledged"`
+}
+
+// DogeSubscriptionAlertRecord 保存一个套餐 ID 当前生命周期提醒状态。
+// State 取值为 low_balance、expiring_soon 或 expired；已确认的 expired 记录会继续保留用于跨同步去重。
+// Acknowledged 只表示当前生命周期阶段是否已在提醒窗口确认，不改变套餐本身的余额和状态。
+type DogeSubscriptionAlertRecord struct {
+	SubscriptionID int64     `json:"subscriptionId"`
+	AmountUSD      float64   `json:"amountUsd"`
+	ThresholdUSD   float64   `json:"thresholdUsd"`
+	State          string    `json:"state"`
+	NotifiedAt     time.Time `json:"notifiedAt"`
+	Acknowledged   bool      `json:"acknowledged"`
+}
+
 // DogeNotificationState 保存公告缓存、未读状态和一次性提醒确认状态。
 type DogeNotificationState struct {
-	Initialized               bool               `json:"initialized"`
-	AnnouncementsEnabled      bool               `json:"announcementsEnabled"`
-	CurrentNotice             string             `json:"currentNotice,omitempty"`
-	Announcements             []DogeAnnouncement `json:"announcements"`
-	ReadAnnouncementIDs       []int64            `json:"readAnnouncementIds"`
-	DismissedAlertKeys        []string           `json:"dismissedAlertKeys"`
-	LastAnnouncementSyncAt    time.Time          `json:"lastAnnouncementSyncAt,omitempty"`
-	LastAnnouncementSyncError string             `json:"lastAnnouncementSyncError,omitempty"`
+	Initialized                   bool                          `json:"initialized"`
+	AnnouncementsEnabled          bool                          `json:"announcementsEnabled"`
+	BalanceAlertEnabled           bool                          `json:"balanceAlertEnabled"`
+	BalanceAlertThresholdUSD      float64                       `json:"balanceAlertThresholdUsd"`
+	SubscriptionAlertEnabled      bool                          `json:"subscriptionAlertEnabled"`
+	SubscriptionAlertThresholdUSD float64                       `json:"subscriptionAlertThresholdUsd"`
+	BalanceAlertRecords           []DogeBalanceAlertRecord      `json:"balanceAlertRecords"`
+	SubscriptionAlertRecords      []DogeSubscriptionAlertRecord `json:"subscriptionAlertRecords"`
+	CurrentNotice                 string                        `json:"currentNotice,omitempty"`
+	Announcements                 []DogeAnnouncement            `json:"announcements"`
+	ReadAnnouncementIDs           []int64                       `json:"readAnnouncementIds"`
+	DismissedAlertKeys            []string                      `json:"dismissedAlertKeys"`
+	LastAnnouncementSyncAt        time.Time                     `json:"lastAnnouncementSyncAt,omitempty"`
+	LastAnnouncementSyncError     string                        `json:"lastAnnouncementSyncError,omitempty"`
+}
+
+// TokenSwitchSettings 保存所有来源共用的令牌故障处理策略。
+// 候选仍限制在当前请求类别；来源只决定候选 Profile 的连接信息，不参与故障处理分流。
+type TokenSwitchSettings struct {
+	Mode                         string `json:"mode"`
+	Trigger401                   bool   `json:"trigger401"`
+	Trigger403                   bool   `json:"trigger403"`
+	Trigger5xx                   bool   `json:"trigger5xx"`
+	TriggerNetwork               bool   `json:"triggerNetwork"`
+	TriggerDirectoryInvalid      bool   `json:"triggerDirectoryInvalid"`
+	TriggerDirectoryMissing      bool   `json:"triggerDirectoryMissing"`
+	AuthFailureThreshold         int    `json:"authFailureThreshold"`
+	UpstreamFailureThreshold     int    `json:"upstreamFailureThreshold"`
+	UpstreamFailureWindowMinutes int    `json:"upstreamFailureWindowMinutes"`
+	Loop                         bool   `json:"loop"`
+}
+
+// DogeAlertSettings 是通用设置页编辑的余额和套餐提醒配置；金额单位为美元。
+type DogeAlertSettings struct {
+	BalanceEnabled           bool    `json:"balanceEnabled"`
+	BalanceThresholdUSD      float64 `json:"balanceThresholdUsd"`
+	SubscriptionEnabled      bool    `json:"subscriptionEnabled"`
+	SubscriptionThresholdUSD float64 `json:"subscriptionThresholdUsd"`
 }
 
 type DogeConnection struct {
@@ -196,10 +262,29 @@ type AppConfig struct {
 	LocalAccessToken string                  `json:"localAccessToken"`
 	ActiveProfiles   map[string]string       `json:"activeProfiles"`
 	Profiles         []Profile               `json:"profiles"`
+	FailoverOrder    map[string][]string     `json:"failoverOrder"`
 	ClientConfigs    map[string]ClientConfig `json:"clientConfigs"`
 	Network          network.Settings        `json:"network"`
 	Preferences      Preferences             `json:"preferences"`
 	Doge             DogeConnection          `json:"doge"`
+	TokenSwitch      TokenSwitchSettings     `json:"tokenSwitch"`
+}
+
+// DefaultTokenSwitchSettings 返回兼容当前版本行为的故障处理默认值。
+func DefaultTokenSwitchSettings() TokenSwitchSettings {
+	return TokenSwitchSettings{
+		Mode:                         TokenSwitchModePrompt,
+		Trigger401:                   true,
+		Trigger403:                   true,
+		Trigger5xx:                   true,
+		TriggerNetwork:               true,
+		TriggerDirectoryInvalid:      true,
+		TriggerDirectoryMissing:      true,
+		AuthFailureThreshold:         DefaultAuthFailureThreshold,
+		UpstreamFailureThreshold:     DefaultUpstreamFailureThreshold,
+		UpstreamFailureWindowMinutes: DefaultUpstreamFailureWindowMinutes,
+		Loop:                         true,
+	}
 }
 
 func Default(proxyPort int) AppConfig {
@@ -210,11 +295,13 @@ func Default(proxyPort int) AppConfig {
 		ProxyPort:        proxyPort,
 		LocalAccessToken: newLocalAccessToken(),
 		Profiles:         []Profile{},
+		FailoverOrder:    map[string][]string{},
 		ActiveProfiles:   map[string]string{},
 		ClientConfigs:    map[string]ClientConfig{},
 		Network:          network.Settings{Mode: "system"},
-		Preferences:      Preferences{CloseToTray: true, VisibleCategories: append([]string(nil), Categories...), DefaultSource: SourceDoge, DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
-		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
+		Preferences:      Preferences{CloseToTray: true, VisibleCategories: append([]string(nil), Categories...), DefaultSource: "", DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
+		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{BalanceAlertEnabled: true, BalanceAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, BalanceAlertRecords: []DogeBalanceAlertRecord{}, SubscriptionAlertRecords: []DogeSubscriptionAlertRecord{}, Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
+		TokenSwitch:      DefaultTokenSwitchSettings(),
 	}
 }
 
@@ -229,6 +316,10 @@ func Clone(source AppConfig) AppConfig {
 	for category, id := range source.ActiveProfiles {
 		clone.ActiveProfiles[category] = id
 	}
+	clone.FailoverOrder = make(map[string][]string, len(source.FailoverOrder))
+	for category, ids := range source.FailoverOrder {
+		clone.FailoverOrder[category] = append([]string(nil), ids...)
+	}
 	clone.ClientConfigs = make(map[string]ClientConfig, len(source.ClientConfigs))
 	for category, client := range source.ClientConfigs {
 		clone.ClientConfigs[category] = client
@@ -238,6 +329,8 @@ func Clone(source AppConfig) AppConfig {
 	copy(clone.Doge.Tokens, source.Doge.Tokens)
 	clone.Doge.TokenOrder = append([]string(nil), source.Doge.TokenOrder...)
 	clone.Doge.Subscriptions = append([]DogeSubscription(nil), source.Doge.Subscriptions...)
+	clone.Doge.Notifications.BalanceAlertRecords = append([]DogeBalanceAlertRecord(nil), source.Doge.Notifications.BalanceAlertRecords...)
+	clone.Doge.Notifications.SubscriptionAlertRecords = append([]DogeSubscriptionAlertRecord(nil), source.Doge.Notifications.SubscriptionAlertRecords...)
 	clone.Doge.Notifications.Announcements = append([]DogeAnnouncement(nil), source.Doge.Notifications.Announcements...)
 	clone.Doge.Notifications.ReadAnnouncementIDs = append([]int64(nil), source.Doge.Notifications.ReadAnnouncementIDs...)
 	clone.Doge.Notifications.DismissedAlertKeys = append([]string(nil), source.Doge.Notifications.DismissedAlertKeys...)
@@ -296,6 +389,46 @@ func OrderProfiles(profiles []Profile, ids []string) ([]Profile, error) {
 		ordered = append(ordered, profile)
 	}
 	return ordered, nil
+}
+
+// NormalizeFailoverOrder 按类别清理并补全 Profile 顺序。
+// 已保存的顺序优先，新增或旧配置中缺失的 Profile 按 profiles 当前顺序追加；未知引用和重复引用会被丢弃。
+func NormalizeFailoverOrder(order map[string][]string, profiles []Profile) map[string][]string {
+	result := make(map[string][]string, len(Categories))
+	known := make(map[string]map[string]struct{}, len(Categories))
+	for _, category := range Categories {
+		known[category] = make(map[string]struct{})
+	}
+	for _, profile := range profiles {
+		if !IsCategory(profile.Category) || strings.TrimSpace(profile.ID) == "" {
+			continue
+		}
+		known[profile.Category][profile.ID] = struct{}{}
+	}
+	for _, category := range Categories {
+		seen := make(map[string]struct{})
+		for _, id := range order[category] {
+			if _, ok := known[category][id]; !ok {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			result[category] = append(result[category], id)
+		}
+		for _, profile := range profiles {
+			if profile.Category != category {
+				continue
+			}
+			if _, ok := seen[profile.ID]; ok {
+				continue
+			}
+			seen[profile.ID] = struct{}{}
+			result[category] = append(result[category], profile.ID)
+		}
+	}
+	return result
 }
 
 func NewProfileID() string {

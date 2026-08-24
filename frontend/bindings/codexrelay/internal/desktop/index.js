@@ -21,6 +21,7 @@ export {
     PublicDogeSubscription,
     PublicDogeToken,
     PublicDogeTokenSwitchCandidate,
+    PublicDogeTokenSwitchHistory,
     PublicDogeTokenSwitchPrompt,
     PublicModel,
     PublicProfile,

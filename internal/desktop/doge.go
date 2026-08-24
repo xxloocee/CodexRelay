@@ -5,6 +5,8 @@
  * @Project       : CodexRelay
  * @Description   : Codex API 中转热切换桌面工具
  * @File          : 二狗子 New API 连接、目录同步与令牌导入
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package desktop
 
@@ -15,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,6 +31,13 @@ import (
 )
 
 const defaultDogeBaseURL = "https://api.ergouzi.life"
+
+const (
+	subscriptionAlertStateLowBalance   = "low_balance"
+	subscriptionAlertStateExpiringSoon = "expiring_soon"
+	subscriptionAlertStateExpired      = "expired"
+	dogeExpiredSubscriptionRetention   = 7 * 24 * time.Hour
+)
 
 type dogeEnvelope struct {
 	Data    json.RawMessage `json:"data"`
@@ -162,6 +172,12 @@ func (s *DesktopService) BindDoge(accessToken string) error {
 	if accessToken == "" {
 		return errors.New("二狗子访问令牌不能为空")
 	}
+	state := s.runtime.State()
+	firstBinding := state == nil || strings.TrimSpace(state.Config.Doge.AccessToken) == ""
+	if firstBinding {
+		s.setDogeAlertsSuppressed(true)
+		defer s.setDogeAlertsSuppressed(false)
+	}
 	if err := s.syncDoge(context.Background(), accessToken, true, dogeSyncFull); err != nil {
 		return err
 	}
@@ -208,23 +224,29 @@ func (s *DesktopService) MarkDogeAnnouncementsRead(ids []int64) error {
 	})
 }
 
-// DismissDogeNotification 确认一个提醒类别；同类余额或套餐提醒一次性关闭，公告按当前未读项关闭。
+// DismissDogeNotification 一次确认当前类别窗口中的全部内容。
+// 余额和套餐都只标记当前状态；过期套餐同样保留按套餐 ID 的已确认记录，避免后续同步重复提醒。
+// 公告仍使用原有的已读状态，避免公告提醒与额度状态混用。
 func (s *DesktopService) DismissDogeNotification(kind string) error {
 	return s.updateConfig(func(cfg *config.AppConfig) error {
 		notifications := &cfg.Doge.Notifications
-		dismissed := append([]string(nil), notifications.DismissedAlertKeys...)
 		switch kind {
 		case NotificationKindBalance:
-			if cfg.Doge.Account.ID > 0 && dogeQuotaToUSD(cfg.Doge.Account.Quota) <= dogeLowQuotaThresholdUSD {
-				dismissed = appendUniqueString(dismissed, balanceAlertKey(cfg.Doge.Account.ID))
+			if notifications.BalanceAlertEnabled && cfg.Doge.Account.ID > 0 && dogeQuotaToUSD(cfg.Doge.Account.Quota) < notifications.BalanceAlertThresholdUSD {
+				for index := range notifications.BalanceAlertRecords {
+					if notifications.BalanceAlertRecords[index].AccountID == cfg.Doge.Account.ID {
+						notifications.BalanceAlertRecords[index].Acknowledged = true
+					}
+				}
 			}
 		case NotificationKindSubscription:
-			for _, subscription := range cfg.Doge.Subscriptions {
-				if subscription.Status == "active" && dogeQuotaToUSD(subscription.AmountTotal-subscription.AmountUsed) <= dogeLowQuotaThresholdUSD {
-					dismissed = appendUniqueString(dismissed, subscriptionAlertKey(subscription.ID))
+			for index := range notifications.SubscriptionAlertRecords {
+				if notifications.SubscriptionAlertEnabled {
+					notifications.SubscriptionAlertRecords[index].Acknowledged = true
 				}
 			}
 		case NotificationKindAnnouncement:
+			dismissed := append([]string(nil), notifications.DismissedAlertKeys...)
 			read := append([]int64(nil), notifications.ReadAnnouncementIDs...)
 			for _, announcement := range notifications.Announcements {
 				if announcement.ID <= 0 {
@@ -234,10 +256,10 @@ func (s *DesktopService) DismissDogeNotification(kind string) error {
 				dismissed = appendUniqueString(dismissed, announcementAlertKey(announcement.ID))
 			}
 			notifications.ReadAnnouncementIDs = read
+			notifications.DismissedAlertKeys = dismissed
 		default:
 			return errors.New("未知的二狗子提醒类别")
 		}
-		notifications.DismissedAlertKeys = dismissed
 		return nil
 	})
 }
@@ -252,8 +274,22 @@ func (s *DesktopService) SetDogeSyncInterval(minutes int) error {
 	})
 }
 
+// UnbindDoge 删除绑定凭据、账户快照和全部二狗子 Profile。
+// Profile、启用映射、故障顺序及对应运行时提示在返回前一并清理，自定义 API 和公告记录不受影响。
 func (s *DesktopService) UnbindDoge() error {
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	removedProfileIDs := make([]string, 0)
+	affectedCategories := make(map[string]struct{})
+	_, err := s.runtime.UpdateConfig(func(cfg *config.AppConfig) error {
+		for _, profile := range cfg.Profiles {
+			if profile.Source != config.SourceDoge {
+				continue
+			}
+			removedProfileIDs = append(removedProfileIDs, profile.ID)
+			if cfg.ActiveProfiles[profile.Category] == profile.ID {
+				affectedCategories[profile.Category] = struct{}{}
+			}
+		}
+		removeMissingDogeProfiles(cfg, nil)
 		cfg.Doge.AccessToken = ""
 		cfg.Doge.User = nil
 		cfg.Doge.Account = config.DogeAccount{}
@@ -264,8 +300,47 @@ func (s *DesktopService) UnbindDoge() error {
 		cfg.Doge.TokenOrder = []string{}
 		cfg.Doge.LastSyncAt = time.Time{}
 		cfg.Doge.LastSyncError = ""
+		cfg.Doge.Notifications.BalanceAlertRecords = []config.DogeBalanceAlertRecord{}
+		cfg.Doge.Notifications.SubscriptionAlertRecords = []config.DogeSubscriptionAlertRecord{}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// 解绑后的目录和故障状态不能继续引用已删除 Profile，否则独立提醒仍可能展示失效候选。
+	removed := make(map[string]struct{}, len(removedProfileIDs))
+	for _, profileID := range removedProfileIDs {
+		removed[profileID] = struct{}{}
+	}
+	s.switchMu.Lock()
+	s.directorySwitches = make(map[string]*tokenSwitchContext)
+	for key := range s.switchPrompts {
+		for profileID := range removed {
+			if strings.HasPrefix(key, profileID+"|") {
+				delete(s.switchPrompts, key)
+				break
+			}
+		}
+	}
+	for category := range affectedCategories {
+		delete(s.switchRounds, category)
+		delete(s.autoSwitchNotices, category)
+	}
+	for category, notice := range s.autoSwitchNotices {
+		if notice != nil {
+			if _, wasRemoved := removed[notice.CurrentProfileID]; wasRemoved {
+				delete(s.autoSwitchNotices, category)
+				delete(s.switchRounds, category)
+			}
+		}
+	}
+	s.switchMu.Unlock()
+	for _, profileID := range removedProfileIDs {
+		s.runtime.ResetProfileHealth(profileID)
+	}
+	s.notifyStateChanged()
+	return nil
 }
 
 // RedeemDoge 使用当前绑定令牌兑换额度；兑换成功后重新同步用户、套餐和购买配置。
@@ -403,6 +478,7 @@ func (s *DesktopService) prepareDogeTokenProfile(id int64, activate bool) error 
 			cfg.Profiles = append(cfg.Profiles, profile)
 			profileIndex = len(cfg.Profiles) - 1
 		}
+		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 		if activate {
 			if cfg.ActiveProfiles == nil {
 				cfg.ActiveProfiles = map[string]string{}
@@ -450,20 +526,41 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 		_ = s.recordDogeSyncError(err.Error())
 		return err
 	}
-	var directorySwitch *tokenSwitchContext
+	directorySwitches := make(map[string]*tokenSwitchContext)
 	if !replaceToken {
-		directorySwitch = buildDogeDirectorySwitchContext(state.Config, data)
+		directorySwitches = buildDogeDirectorySwitchContexts(state.Config, data)
+		// Profile 已在首次缺失同步中删除；后续同步只要远端仍缺失且类别尚未切换，就继续保留同一运行时提示。
+		for category, existing := range s.dogeDirectorySwitchContexts() {
+			if _, fresh := directorySwitches[category]; fresh || existing == nil || existing.directoryReason != dogeDirectoryFailureMissing {
+				continue
+			}
+			if !directorySwitchContextApplies(state.Config, existing) || dogeTokenDirectoryContains(data.Tokens, existing.profile.RemoteTokenID) {
+				continue
+			}
+			existing.tokens = append([]config.DogeToken(nil), data.Tokens...)
+			existing.groups = append([]string(nil), data.Groups...)
+			directorySwitches[category] = existing
+		}
 	}
 	if err := s.saveDogeData(data, announcements, baseURL, accessToken, previousOrder); err != nil {
 		return err
 	}
-	s.setDogeDirectorySwitchContext(directorySwitch)
+	s.setDogeDirectorySwitchContexts(directorySwitches)
 	return nil
 }
 
-// buildDogeDirectorySwitchContext 对比同步前后的活动二狗子令牌目录。
+func dogeTokenDirectoryContains(tokens []config.DogeToken, remoteTokenID int64) bool {
+	for _, token := range tokens {
+		if token.ID == remoteTokenID {
+			return true
+		}
+	}
+	return false
+}
+
+// buildDogeDirectorySwitchContexts 对比同步前后的活动二狗子令牌目录，并按类别保留全部异常。
 // 当前令牌消失、状态不再为 1，或所属分组不再可用时生成运行时切换上下文；有效状态 1 来自用户提供的正式接口响应样本。
-func buildDogeDirectorySwitchContext(previous config.AppConfig, current config.DogeConnection) *tokenSwitchContext {
+func buildDogeDirectorySwitchContexts(previous config.AppConfig, current config.DogeConnection) map[string]*tokenSwitchContext {
 	previousTokens := make(map[int64]config.DogeToken, len(previous.Doge.Tokens))
 	for _, token := range previous.Doge.Tokens {
 		previousTokens[token.ID] = token
@@ -478,6 +575,7 @@ func buildDogeDirectorySwitchContext(previous config.AppConfig, current config.D
 			profilesByRemoteID[profile.RemoteTokenID] = profile
 		}
 	}
+	result := make(map[string]*tokenSwitchContext)
 	for _, category := range config.Categories {
 		profileID := previous.ActiveProfiles[category]
 		profileIndex := config.FindProfileIndex(previous.Profiles, profileID)
@@ -507,11 +605,30 @@ func buildDogeDirectorySwitchContext(previous config.AppConfig, current config.D
 				ID: profile.RemoteTokenID, Name: profile.Name, Category: profile.Category,
 			}
 		}
-		return &tokenSwitchContext{
+		result[category] = &tokenSwitchContext{
 			key:         profile.ID + "|directory|" + strconv.FormatInt(profile.RemoteTokenID, 10),
 			failureKind: "directory", directoryReason: reason, profile: profile, token: selected,
 			profilesByID: profilesByRemoteID, tokens: append([]config.DogeToken(nil), current.Tokens...),
-			groups: append([]string(nil), current.Groups...),
+			groups:        append([]string(nil), current.Groups...),
+			failoverOrder: append([]string(nil), config.NormalizeFailoverOrder(previous.FailoverOrder, previous.Profiles)[category]...),
+		}
+	}
+	candidateConfig := config.Clone(previous)
+	candidateConfig.Doge = current
+	for _, context := range result {
+		if context != nil {
+			context.candidateProfiles = directoryFailoverCandidates(candidateConfig, context)
+		}
+	}
+	return result
+}
+
+// buildDogeDirectorySwitchContext 保留单条测试入口，返回类别顺序中的第一条目录异常。
+func buildDogeDirectorySwitchContext(previous config.AppConfig, current config.DogeConnection) *tokenSwitchContext {
+	contexts := buildDogeDirectorySwitchContexts(previous, current)
+	for _, category := range config.Categories {
+		if context := contexts[category]; context != nil {
+			return context
 		}
 	}
 	return nil
@@ -552,11 +669,15 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 	data.BaseURL = baseURL
 	data.TokenOrder = mergeDogeTokenOrder(previousOrder, data.Tokens)
 	data.Tokens = orderDogeTokens(data.TokenOrder, data.Tokens)
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	removedProfileIDs := make([]string, 0)
+	err := s.updateConfig(func(cfg *config.AppConfig) error {
 		// 同步响应只覆盖远端目录字段；同步间隔由本地设置维护，必须从当前配置继承，避免后台同步把用户选择重置为默认值。
 		data.SyncIntervalMinutes = cfg.Doge.SyncIntervalMinutes
 		data.Notifications = mergeDogeAnnouncementState(cfg.Doge.Notifications, announcements)
-		data.Notifications.DismissedAlertKeys = pruneDogeAlertKeys(data.Notifications.DismissedAlertKeys, data)
+		now := time.Now()
+		data.Subscriptions = filterDogeSubscriptionsForStorage(data.Subscriptions, now)
+		reconcileDogeQuotaAlertRecords(&data.Notifications, data.Account, data.Subscriptions, now)
+		data.Notifications.DismissedAlertKeys = pruneDogeAlertKeys(data.Notifications.DismissedAlertKeys, data.Subscriptions, now)
 		for i := range data.Tokens {
 			if data.Tokens[i].Category != "" {
 				continue
@@ -589,9 +710,52 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 				break
 			}
 		}
+		removedProfileIDs = removeMissingDogeProfiles(cfg, data.Tokens)
 		cfg.Doge = data
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	for _, profileID := range removedProfileIDs {
+		s.runtime.ResetProfileHealth(profileID)
+	}
+	return nil
+}
+
+// removeMissingDogeProfiles 以本次成功同步的完整令牌目录清理本地二狗子 Profile。
+// 自定义 API 不受影响；被删除项同时退出启用映射和故障顺序，避免旧密钥继续参与路由或切换。
+func removeMissingDogeProfiles(cfg *config.AppConfig, tokens []config.DogeToken) []string {
+	if cfg == nil {
+		return nil
+	}
+	knownRemoteIDs := make(map[int64]struct{}, len(tokens))
+	for _, token := range tokens {
+		if token.ID > 0 {
+			knownRemoteIDs[token.ID] = struct{}{}
+		}
+	}
+	kept := make([]config.Profile, 0, len(cfg.Profiles))
+	removed := make([]string, 0)
+	for _, profile := range cfg.Profiles {
+		if profile.Source != config.SourceDoge {
+			kept = append(kept, profile)
+			continue
+		}
+		if profile.RemoteTokenID > 0 {
+			if _, exists := knownRemoteIDs[profile.RemoteTokenID]; exists {
+				kept = append(kept, profile)
+				continue
+			}
+		}
+		removed = append(removed, profile.ID)
+		if cfg.ActiveProfiles[profile.Category] == profile.ID {
+			delete(cfg.ActiveProfiles, profile.Category)
+		}
+	}
+	cfg.Profiles = kept
+	cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
+	return removed
 }
 
 func mergeDogeAnnouncementState(notifications config.DogeNotificationState, snapshot dogeAnnouncementSnapshot) config.DogeNotificationState {
@@ -691,6 +855,10 @@ func pruneAnnouncementAlertKeys(values []string, announcements []config.DogeAnno
 	}
 	result := make([]string, 0, len(values))
 	for _, value := range values {
+		if !strings.HasPrefix(value, "announcement:") {
+			result = appendUniqueString(result, value)
+			continue
+		}
 		if _, ok := known[value]; ok {
 			result = appendUniqueString(result, value)
 		}
@@ -698,25 +866,219 @@ func pruneAnnouncementAlertKeys(values []string, announcements []config.DogeAnno
 	return result
 }
 
-func pruneDogeAlertKeys(values []string, connection config.DogeConnection) []string {
-	known := make(map[string]struct{}, len(values))
-	if connection.Account.ID > 0 && dogeQuotaToUSD(connection.Account.Quota) <= dogeLowQuotaThresholdUSD {
-		known[balanceAlertKey(connection.Account.ID)] = struct{}{}
+// filterDogeSubscriptionsForStorage 只保存上游本次返回的有效套餐，以及到期不超过七天的套餐。
+// 上游已删除的套餐不会从旧配置回填；超过保留期的套餐正文和对应提醒记录会在本次同步一起清理。
+func filterDogeSubscriptionsForStorage(current []config.DogeSubscription, now time.Time) []config.DogeSubscription {
+	result := make([]config.DogeSubscription, 0, len(current))
+	for _, subscription := range current {
+		if subscription.ID <= 0 {
+			continue
+		}
+		if isDogeSubscriptionActive(subscription, now) {
+			result = append(result, subscription)
+			continue
+		}
+		if !isDogeSubscriptionExpiredWithinRetention(subscription, now) {
+			continue
+		}
+		subscription.Status = subscriptionAlertStateExpired
+		result = append(result, subscription)
 	}
-	for _, subscription := range connection.Subscriptions {
-		if subscription.Status == "active" && dogeQuotaToUSD(subscription.AmountTotal-subscription.AmountUsed) <= dogeLowQuotaThresholdUSD {
-			known[subscriptionAlertKey(subscription.ID)] = struct{}{}
+	return result
+}
+
+// reconcileDogeQuotaAlertRecords 按账户 ID 和套餐 ID 归并余额提醒状态。
+// 钱包使用账户 ID，套餐使用套餐 ID；低余额、24 小时内到期和已过期分别维护生命周期状态。
+// 同一状态的后续同步只更新金额，状态切换才重新触发提醒。过期且余额不高于阈值时静默删除。
+// 旧版本的 DismissedAlertKeys 会在首次归并时转为已确认记录，之后该列表只保留公告键。
+func reconcileDogeQuotaAlertRecords(notifications *config.DogeNotificationState, account config.DogeAccount, subscriptions []config.DogeSubscription, now time.Time) {
+	if notifications == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	balanceThreshold := notifications.BalanceAlertThresholdUSD
+	if balanceThreshold <= 0 {
+		balanceThreshold = config.DefaultQuotaAlertThresholdUSD
+	}
+	subscriptionThreshold := notifications.SubscriptionAlertThresholdUSD
+	if subscriptionThreshold <= 0 {
+		subscriptionThreshold = config.DefaultQuotaAlertThresholdUSD
+	}
+
+	balanceRecords := append([]config.DogeBalanceAlertRecord(nil), notifications.BalanceAlertRecords...)
+	if account.ID > 0 {
+		index := findDogeBalanceAlertRecord(balanceRecords, account.ID)
+		amount := dogeQuotaToUSD(account.Quota)
+		if amount >= balanceThreshold {
+			balanceRecords = removeDogeBalanceAlertRecord(balanceRecords, account.ID)
+		} else if index < 0 {
+			if notifications.BalanceAlertEnabled {
+				balanceRecords = append(balanceRecords, config.DogeBalanceAlertRecord{
+					AccountID: account.ID, AmountUSD: amount, ThresholdUSD: balanceThreshold,
+					NotifiedAt: now, Acknowledged: legacyAlertWasDismissed(notifications.DismissedAlertKeys, balanceAlertKey(account.ID)),
+				})
+			}
+		} else {
+			record := &balanceRecords[index]
+			thresholdChanged := alertThresholdChanged(record.ThresholdUSD, balanceThreshold)
+			record.AmountUSD = amount
+			record.ThresholdUSD = balanceThreshold
+			if thresholdChanged {
+				record.NotifiedAt = now
+				record.Acknowledged = false
+			}
+		}
+	}
+	notifications.BalanceAlertRecords = balanceRecords
+
+	previousSubscriptions := append([]config.DogeSubscriptionAlertRecord(nil), notifications.SubscriptionAlertRecords...)
+	subscriptionRecords := make([]config.DogeSubscriptionAlertRecord, 0, len(previousSubscriptions))
+	for _, subscription := range subscriptions {
+		if subscription.ID <= 0 || !isDogeSubscriptionTrackable(subscription, now) {
+			continue
+		}
+		amount := dogeQuotaToUSD(subscription.AmountTotal - subscription.AmountUsed)
+		index := findDogeSubscriptionAlertRecord(previousSubscriptions, subscription.ID)
+		state := dogeSubscriptionAlertState(subscription, amount, subscriptionThreshold, now)
+		if state == "" {
+			// 已过期且余额不高于阈值，或未达到任何提醒条件；清理旧记录。
+			continue
+		}
+		if index < 0 {
+			if notifications.SubscriptionAlertEnabled {
+				subscriptionRecords = append(subscriptionRecords, config.DogeSubscriptionAlertRecord{
+					SubscriptionID: subscription.ID, AmountUSD: amount, ThresholdUSD: subscriptionThreshold,
+					State: state, NotifiedAt: now, Acknowledged: legacyAlertWasDismissed(notifications.DismissedAlertKeys, subscriptionAlertKey(subscription.ID)) ||
+						(state == subscriptionAlertStateExpired && legacyAlertWasDismissed(notifications.DismissedAlertKeys, subscriptionExpiredAlertKey(subscription.ID))),
+				})
+			}
+			continue
+		}
+		record := previousSubscriptions[index]
+		previousState := record.State
+		if previousState == "" {
+			previousState = subscriptionAlertStateLowBalance
+		}
+		record.AmountUSD = amount
+		record.State = state
+		if state == subscriptionAlertStateExpired && legacyAlertWasDismissed(notifications.DismissedAlertKeys, subscriptionExpiredAlertKey(subscription.ID)) {
+			record.Acknowledged = true
+		}
+		if previousState != state || alertThresholdChanged(record.ThresholdUSD, subscriptionThreshold) {
+			record.ThresholdUSD = subscriptionThreshold
+			record.NotifiedAt = now
+			record.Acknowledged = false
+		}
+		subscriptionRecords = append(subscriptionRecords, record)
+	}
+	notifications.SubscriptionAlertRecords = subscriptionRecords
+}
+
+func alertThresholdChanged(previous, current float64) bool {
+	return previous <= 0 || math.Abs(previous-current) > 1e-9
+}
+
+func legacyAlertWasDismissed(values []string, key string) bool {
+	for _, value := range values {
+		if value == key {
+			return true
+		}
+	}
+	return false
+}
+
+func findDogeBalanceAlertRecord(records []config.DogeBalanceAlertRecord, accountID int64) int {
+	for index := range records {
+		if records[index].AccountID == accountID {
+			return index
+		}
+	}
+	return -1
+}
+
+func removeDogeBalanceAlertRecord(records []config.DogeBalanceAlertRecord, accountID int64) []config.DogeBalanceAlertRecord {
+	result := records[:0]
+	for _, record := range records {
+		if record.AccountID != accountID {
+			result = append(result, record)
+		}
+	}
+	return result
+}
+
+func findDogeSubscriptionAlertRecord(records []config.DogeSubscriptionAlertRecord, subscriptionID int64) int {
+	for index := range records {
+		if records[index].SubscriptionID == subscriptionID {
+			return index
+		}
+	}
+	return -1
+}
+
+func isDogeSubscriptionExpired(subscription config.DogeSubscription, now time.Time) bool {
+	if subscription.EndTime > 0 && !time.Unix(subscription.EndTime, 0).After(now) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(subscription.Status), subscriptionAlertStateExpired)
+}
+
+func isDogeSubscriptionActive(subscription config.DogeSubscription, now time.Time) bool {
+	return strings.EqualFold(strings.TrimSpace(subscription.Status), "active") && !isDogeSubscriptionExpired(subscription, now)
+}
+
+func isDogeSubscriptionTrackable(subscription config.DogeSubscription, now time.Time) bool {
+	return isDogeSubscriptionActive(subscription, now) || isDogeSubscriptionExpiredWithinRetention(subscription, now)
+}
+
+func isDogeSubscriptionExpiredWithinRetention(subscription config.DogeSubscription, now time.Time) bool {
+	if subscription.EndTime <= 0 {
+		return false
+	}
+	expiresAt := time.Unix(subscription.EndTime, 0)
+	return !expiresAt.After(now) && now.Sub(expiresAt) <= dogeExpiredSubscriptionRetention
+}
+
+func dogeSubscriptionAlertState(subscription config.DogeSubscription, amount, threshold float64, now time.Time) string {
+	if isDogeSubscriptionExpired(subscription, now) {
+		if amount > threshold {
+			return subscriptionAlertStateExpired
+		}
+		return ""
+	}
+	if amount < threshold {
+		return subscriptionAlertStateLowBalance
+	}
+	if amount > threshold && subscription.EndTime > 0 {
+		remaining := time.Unix(subscription.EndTime, 0).Sub(now)
+		if remaining > 0 && remaining <= 24*time.Hour {
+			return subscriptionAlertStateExpiringSoon
+		}
+	}
+	return ""
+}
+
+func pruneDogeAlertKeys(values []string, subscriptions []config.DogeSubscription, now time.Time) []string {
+	result := make([]string, 0, len(values))
+	knownSubscriptions := make(map[int64]config.DogeSubscription, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription.ID > 0 {
+			knownSubscriptions[subscription.ID] = subscription
 		}
 	}
 	for _, value := range values {
 		if strings.HasPrefix(value, "announcement:") {
-			known[value] = struct{}{}
-		}
-	}
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if _, ok := known[value]; ok {
 			result = appendUniqueString(result, value)
+			continue
+		}
+		if strings.HasPrefix(value, "subscription-expired:") {
+			id, err := strconv.ParseInt(strings.TrimPrefix(value, "subscription-expired:"), 10, 64)
+			if err == nil {
+				if subscription, ok := knownSubscriptions[id]; ok && isDogeSubscriptionExpired(subscription, now) {
+					result = appendUniqueString(result, value)
+				}
+			}
 		}
 	}
 	return result
@@ -975,9 +1337,6 @@ func (s *DesktopService) fetchDogeSubscriptions(ctx context.Context, client *htt
 	}
 	result := make([]config.DogeSubscription, 0, len(payload.Subscriptions))
 	for _, item := range payload.Subscriptions {
-		if strings.TrimSpace(item.Subscription.Status) != "active" {
-			continue
-		}
 		result = append(result, config.DogeSubscription{ID: item.Subscription.ID, PlanID: item.Subscription.PlanID, PlanTitle: item.Plan.Title, Status: item.Subscription.Status, AmountTotal: item.Subscription.AmountTotal, AmountUsed: item.Subscription.AmountUsed, StartTime: item.Subscription.StartTime, EndTime: item.Subscription.EndTime})
 	}
 	return result, nil

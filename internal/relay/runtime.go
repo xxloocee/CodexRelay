@@ -5,6 +5,8 @@
  * @Project       : CodexRelay
  * @Description   : Codex API 中转热切换桌面工具
  * @File          : 代理 API 运行时快照与热切换状态
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 package relay
 
@@ -40,15 +42,16 @@ type State struct {
 }
 
 type Runtime struct {
-	configStore   *config.Store
-	usageStore    *usage.Store
-	state         atomic.Pointer[State]
-	mu            sync.Mutex
-	nextID        atomic.Uint64
-	startedAt     time.Time
-	healthMu      sync.Mutex
-	health        map[string]*profileHealthState
-	healthChanged func()
+	configStore    *config.Store
+	usageStore     *usage.Store
+	state          atomic.Pointer[State]
+	mu             sync.Mutex
+	nextID         atomic.Uint64
+	startedAt      time.Time
+	healthMu       sync.Mutex
+	health         map[string]*profileHealthState
+	healthChanged  func()
+	resultObserved func(profileID, category string, status int, transportError bool)
 }
 
 func New(configStore *config.Store, usageStore *usage.Store, cfg config.AppConfig) (*Runtime, error) {

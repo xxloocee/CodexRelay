@@ -5,11 +5,13 @@
  * @Project       : CodexRelay
  * @Description   : 独立提醒窗口的紧凑视觉样式
  * @File          : 右下角提醒窗口样式
+ * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
+ * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
 :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei UI", sans-serif; color: #1b2026; }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; background: transparent; }
-body { padding: 10px; overflow: hidden; }
+body { padding: 0; overflow: hidden; }
 .icon { width: 14px; height: 14px; display: inline-block; flex: 0 0 auto; background: currentColor; -webkit-mask: var(--icon-url) center / contain no-repeat; mask: var(--icon-url) center / contain no-repeat; }
 .icon-load { --icon-url: url("/icons/load.svg"); }
 .spin { animation: notification-icon-spin .8s linear infinite; }
@@ -29,6 +31,7 @@ body { padding: 10px; overflow: hidden; }
 .notification-row.token-switch { border-color: #2c9b82; }
 .notification-row strong { font-size: 12px; }
 .notification-row span, .notification-row .notification-markdown { color: #5f6872; font-size: 12px; line-height: 1.35; }
+.notification-global-status { flex: 0 0 auto; margin: 10px 0 0; padding: 7px 9px; border: 1px solid #efc0c0; border-radius: 7px; background: #fff4f4; color: #b42318; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .notification-markdown { overflow-wrap: anywhere; }
 .notification-markdown p { margin: 0 0 5px; }
 .notification-markdown p:last-child { margin-bottom: 0; }
@@ -44,7 +47,15 @@ body { padding: 10px; overflow: hidden; }
 .notification-dismiss { width: 100%; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 12px; border: 0; border-radius: 7px; background: #1687f8; color: #fff; font-size: 12px; }
 .notification-dismiss:hover, .notification-dismiss:focus-visible { background: #0875df; outline: none; }
 .token-switch-panel { display: grid; gap: 8px; padding-top: 12px; }
-.token-switch-message { margin: 0; color: #46515c; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.token-stop-panel { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid #f0b7b7; border-radius: 7px; background: #fff3f3; color: #b42318; }
+.token-stop-panel strong { font-size: 14px; line-height: 1.3; }
+.token-stop-panel span { color: #8f2a25; font-size: 11px; line-height: 1.4; }
+.token-switch-message { margin: 0; color: #46515c; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-line; }
+.token-switch-history { display: grid; gap: 5px; }
+.token-switch-history-heading { color: #7a838d; font-size: 11px; font-weight: 600; }
+.token-switch-history-rows { display: grid; gap: 6px; }
+.token-switch-history-row { display: grid; gap: 2px; padding: 7px 8px; border-left: 3px solid #2c9b82; background: #f5faf8; color: #6a737d; font-size: 11px; line-height: 1.35; }
+.token-switch-history-row strong { color: #34404a; font-size: 12px; font-weight: 600; }
 .token-switch-label { color: #7a838d; font-size: 11px; }
 .token-switch-select { width: 100%; min-height: 34px; padding: 5px 8px; border: 1px solid #d6dce2; border-radius: 7px; background: #fff; color: #252c33; font: inherit; font-size: 12px; }
 .token-switch-select:focus-visible { border-color: #1687f8; outline: 2px solid rgba(22, 135, 248, .18); }

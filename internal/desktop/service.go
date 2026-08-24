@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -34,59 +35,65 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-var applicationVersion = "1.0.0"
+var applicationVersion = "2.0.0"
 
 const (
 	NotificationKindBalance      = "balance"
 	NotificationKindSubscription = "subscription"
 	NotificationKindAnnouncement = "announcement"
 	NotificationKindTokenSwitch  = "token-switch"
-	dogeLowQuotaThresholdUSD     = 1.0
 	dogeProfileURL               = "https://ergouzi.life/profile"
 )
 
 type DesktopState struct {
-	Version          string                  `json:"version"`
-	UpdateSupported  bool                    `json:"updateSupported"`
-	NeedsOnboarding  bool                    `json:"needsOnboarding"`
-	DataDirectory    string                  `json:"dataDirectory"`
-	ProxyPort        int                     `json:"proxyPort"`
-	ProxyURL         string                  `json:"proxyUrl"`
-	ProxyURLs        map[string]string       `json:"proxyUrls"`
-	LocalAccessToken string                  `json:"localAccessToken"`
-	ActiveProfiles   map[string]string       `json:"activeProfiles"`
-	Profiles         []PublicProfile         `json:"profiles"`
-	ClientConfigs    []PublicClientConfig    `json:"clientConfigs"`
-	Network          network.Settings        `json:"network"`
-	SystemProxy      network.SystemProxyInfo `json:"systemProxy"`
-	Requests         []usage.RequestRecord   `json:"requests"`
-	Usage            usage.Overview          `json:"usage"`
-	UptimeSeconds    int64                   `json:"uptimeSeconds"`
-	Preferences      config.Preferences      `json:"preferences"`
-	Doge             DogeState               `json:"doge"`
+	Version          string                     `json:"version"`
+	UpdateSupported  bool                       `json:"updateSupported"`
+	NeedsOnboarding  bool                       `json:"needsOnboarding"`
+	DataDirectory    string                     `json:"dataDirectory"`
+	ProxyPort        int                        `json:"proxyPort"`
+	ProxyURL         string                     `json:"proxyUrl"`
+	ProxyURLs        map[string]string          `json:"proxyUrls"`
+	LocalAccessToken string                     `json:"localAccessToken"`
+	ActiveProfiles   map[string]string          `json:"activeProfiles"`
+	Profiles         []PublicProfile            `json:"profiles"`
+	FailoverOrder    map[string][]string        `json:"failoverOrder"`
+	ClientConfigs    []PublicClientConfig       `json:"clientConfigs"`
+	Network          network.Settings           `json:"network"`
+	SystemProxy      network.SystemProxyInfo    `json:"systemProxy"`
+	Requests         []usage.RequestRecord      `json:"requests"`
+	Usage            usage.Overview             `json:"usage"`
+	UptimeSeconds    int64                      `json:"uptimeSeconds"`
+	Preferences      config.Preferences         `json:"preferences"`
+	TokenSwitch      config.TokenSwitchSettings `json:"tokenSwitch"`
+	Doge             DogeState                  `json:"doge"`
 }
 
 type DogeState struct {
-	BaseURL             string                       `json:"baseUrl"`
-	Bound               bool                         `json:"bound"`
-	Account             PublicDogeAccount            `json:"account"`
-	User                map[string]any               `json:"user"`
-	WalletUSD           float64                      `json:"walletUsd"`
-	SubscriptionsUSD    float64                      `json:"subscriptionsUsd"`
-	TotalUSD            float64                      `json:"totalUsd"`
-	Subscriptions       []PublicDogeSubscription     `json:"subscriptions"`
-	RedemptionEnabled   bool                         `json:"redemptionEnabled"`
-	TopupLink           string                       `json:"topupLink"`
-	Groups              []string                     `json:"groups"`
-	Tokens              []PublicDogeToken            `json:"tokens"`
-	Notifications       PublicDogeNotifications      `json:"notifications"`
-	TokenSwitch         *PublicDogeTokenSwitchPrompt `json:"tokenSwitch,omitempty"`
-	Syncing             bool                         `json:"syncing"`
-	SyncPhase           string                       `json:"syncPhase"`
-	AnnouncementSyncing bool                         `json:"announcementSyncing"`
-	SyncIntervalMinutes int                          `json:"syncIntervalMinutes"`
-	LastSyncAt          string                       `json:"lastSyncAt"`
-	LastSyncError       string                       `json:"lastSyncError"`
+	BaseURL                       string                                  `json:"baseUrl"`
+	Bound                         bool                                    `json:"bound"`
+	Account                       PublicDogeAccount                       `json:"account"`
+	User                          map[string]any                          `json:"user"`
+	WalletUSD                     float64                                 `json:"walletUsd"`
+	SubscriptionsUSD              float64                                 `json:"subscriptionsUsd"`
+	TotalUSD                      float64                                 `json:"totalUsd"`
+	Subscriptions                 []PublicDogeSubscription                `json:"subscriptions"`
+	RedemptionEnabled             bool                                    `json:"redemptionEnabled"`
+	TopupLink                     string                                  `json:"topupLink"`
+	Groups                        []string                                `json:"groups"`
+	Tokens                        []PublicDogeToken                       `json:"tokens"`
+	Notifications                 PublicDogeNotifications                 `json:"notifications"`
+	TokenSwitch                   *PublicDogeTokenSwitchPrompt            `json:"tokenSwitch,omitempty"`
+	TokenSwitches                 map[string]*PublicDogeTokenSwitchPrompt `json:"tokenSwitches"`
+	BalanceAlertEnabled           bool                                    `json:"balanceAlertEnabled"`
+	BalanceAlertThresholdUSD      float64                                 `json:"balanceAlertThresholdUsd"`
+	SubscriptionAlertEnabled      bool                                    `json:"subscriptionAlertEnabled"`
+	SubscriptionAlertThresholdUSD float64                                 `json:"subscriptionAlertThresholdUsd"`
+	Syncing                       bool                                    `json:"syncing"`
+	SyncPhase                     string                                  `json:"syncPhase"`
+	AnnouncementSyncing           bool                                    `json:"announcementSyncing"`
+	SyncIntervalMinutes           int                                     `json:"syncIntervalMinutes"`
+	LastSyncAt                    string                                  `json:"lastSyncAt"`
+	LastSyncError                 string                                  `json:"lastSyncError"`
 }
 
 // PublicDogeAccount 是连接页展示的账户摘要；额度字段统一转换为美元，不包含访问令牌。
@@ -131,19 +138,36 @@ type PublicDogeTokenSwitchCandidate struct {
 	DisabledReason string  `json:"disabledReason,omitempty"`
 }
 
+// PublicDogeTokenSwitchHistory 是自动轮次中的切换或最终故障记录，不包含 API 密钥或请求正文。
+// ToName 为空表示当前令牌失败后没有可切换目标，前端应将 SwitchedAt 显示为故障时间。
+type PublicDogeTokenSwitchHistory struct {
+	FromName       string `json:"fromName"`
+	ToName         string `json:"toName"`
+	SwitchedAt     string `json:"switchedAt"`
+	FailureMessage string `json:"failureMessage"`
+}
+
 // PublicDogeTokenSwitchPrompt 是右下角令牌切换弹窗的只读状态。
 type PublicDogeTokenSwitchPrompt struct {
-	Key            string                           `json:"key"`
-	Category       string                           `json:"category"`
-	FailureKind    string                           `json:"failureKind"`
-	FailureCount   int                              `json:"failureCount"`
-	FailureStatus  int                              `json:"failureStatus,omitempty"`
-	CurrentTokenID int64                            `json:"currentTokenId"`
-	CurrentName    string                           `json:"currentName"`
-	CurrentGroup   string                           `json:"currentGroup"`
-	CurrentRatio   float64                          `json:"currentRatio"`
-	Message        string                           `json:"message"`
-	Candidates     []PublicDogeTokenSwitchCandidate `json:"candidates"`
+	Key                  string                           `json:"key"`
+	Category             string                           `json:"category"`
+	Mode                 string                           `json:"mode"`
+	FailureKind          string                           `json:"failureKind"`
+	FailureCount         int                              `json:"failureCount"`
+	FailureStatus        int                              `json:"failureStatus,omitempty"`
+	FailureWindowMinutes int                              `json:"failureWindowMinutes,omitempty"`
+	CurrentTokenID       int64                            `json:"currentTokenId"`
+	CurrentProfileID     string                           `json:"currentProfileId"`
+	CurrentName          string                           `json:"currentName"`
+	CurrentGroup         string                           `json:"currentGroup"`
+	CurrentRatio         float64                          `json:"currentRatio"`
+	Message              string                           `json:"message"`
+	SwitchedToName       string                           `json:"switchedToName,omitempty"`
+	Candidates           []PublicDogeTokenSwitchCandidate `json:"candidates"`
+	SwitchHistory        []PublicDogeTokenSwitchHistory   `json:"switchHistory,omitempty"`
+	Stopped              bool                             `json:"stopped,omitempty"`
+	StoppedAt            string                           `json:"stoppedAt,omitempty"`
+	StopMessage          string                           `json:"stopMessage,omitempty"`
 }
 
 // PublicDogeNotifications 是公告中心和提醒窗口共用的只读快照。
@@ -202,19 +226,20 @@ type DogeTokenCategoryInput struct {
 }
 
 type PublicProfile struct {
-	ID            string            `json:"id"`
-	Source        string            `json:"source"`
-	Category      string            `json:"category"`
-	Name          string            `json:"name"`
-	BaseURL       string            `json:"baseUrl"`
-	APIKey        string            `json:"apiKey"`
-	Note          string            `json:"note,omitempty"`
-	Headers       map[string]string `json:"headers"`
-	Models        []PublicModel     `json:"models"`
-	DefaultModel  string            `json:"defaultModel"`
-	Active        bool              `json:"active"`
-	PreviewURL    string            `json:"previewUrl"`
-	RemoteTokenID int64             `json:"remoteTokenId,omitempty"`
+	ID             string            `json:"id"`
+	Source         string            `json:"source"`
+	Category       string            `json:"category"`
+	Name           string            `json:"name"`
+	BaseURL        string            `json:"baseUrl"`
+	APIKey         string            `json:"apiKey"`
+	Note           string            `json:"note,omitempty"`
+	Headers        map[string]string `json:"headers"`
+	Models         []PublicModel     `json:"models"`
+	DefaultModel   string            `json:"defaultModel"`
+	Active         bool              `json:"active"`
+	PreviewURL     string            `json:"previewUrl"`
+	RemoteTokenID  int64             `json:"remoteTokenId,omitempty"`
+	SkipAutoSwitch bool              `json:"skipAutoSwitch"`
 }
 
 // PublicModel 是编辑页模型管理器展示的模型摘要，不包含密钥或请求正文。
@@ -255,23 +280,27 @@ type TestResult struct {
 }
 
 type DesktopService struct {
-	runtime             *relay.Runtime
-	server              *http.Server
-	listener            net.Listener
-	mu                  sync.Mutex
-	onStateChanged      func()
-	stateChanged        []func()
-	needsOnboarding     bool
-	dogeMu              sync.Mutex
-	updateMu            sync.Mutex
-	dogeSyncing         bool
-	dogeSyncPhase       string
-	announcementSyncing bool
-	switchMu            sync.Mutex
-	switchPrompts       map[string]*tokenSwitchPromptState
-	directorySwitch     *tokenSwitchContext
-	syncCancel          context.CancelFunc
-	syncStarted         bool
+	runtime              *relay.Runtime
+	server               *http.Server
+	listener             net.Listener
+	mu                   sync.Mutex
+	onStateChanged       func()
+	stateChanged         []func()
+	needsOnboarding      bool
+	dogeMu               sync.Mutex
+	updateMu             sync.Mutex
+	failoverMu           sync.Mutex
+	dogeSyncing          bool
+	dogeSyncPhase        string
+	announcementSyncing  bool
+	dogeAlertsSuppressed bool
+	switchMu             sync.Mutex
+	switchPrompts        map[string]*tokenSwitchPromptState
+	switchRounds         map[string]*tokenSwitchRound
+	directorySwitches    map[string]*tokenSwitchContext
+	autoSwitchNotices    map[string]*PublicDogeTokenSwitchPrompt
+	syncCancel           context.CancelFunc
+	syncStarted          bool
 }
 
 type tokenSwitchPromptState struct {
@@ -279,19 +308,32 @@ type tokenSwitchPromptState struct {
 	suppressedUntil time.Time
 }
 
+// tokenSwitchRound 保存一个 API 类别在本次运行中的故障轮次；不写入配置文件。
+// 每个 Profile 在一轮中最多被尝试一次，全部候选都失败后停止自动切换，避免循环使用故障令牌。
+type tokenSwitchRound struct {
+	AttemptedIDs map[string]struct{}
+	History      []PublicDogeTokenSwitchHistory
+	Stopped      bool
+	StoppedAt    time.Time
+	StopMessage  string
+}
+
 type tokenSwitchContext struct {
-	key             string
-	failureKind     string
-	directoryReason string
-	failureCount    int
-	failureStatus   int
-	health          relay.HealthSnapshot
-	profile         config.Profile
-	token           config.DogeToken
-	candidates      []config.DogeToken
-	profilesByID    map[int64]config.Profile
-	tokens          []config.DogeToken
-	groups          []string
+	key                  string
+	failureKind          string
+	directoryReason      string
+	failureCount         int
+	failureStatus        int
+	failureWindowMinutes int
+	health               relay.HealthSnapshot
+	profile              config.Profile
+	token                config.DogeToken
+	candidates           []config.DogeToken
+	profilesByID         map[int64]config.Profile
+	tokens               []config.DogeToken
+	groups               []string
+	candidateProfiles    []config.Profile
+	failoverOrder        []string
 }
 
 const (
@@ -300,8 +342,12 @@ const (
 )
 
 func NewDesktopService(runtime *relay.Runtime) *DesktopService {
-	service := &DesktopService{runtime: runtime, switchPrompts: make(map[string]*tokenSwitchPromptState)}
-	runtime.SetHealthChangedHandler(service.notifyStateChanged)
+	service := &DesktopService{
+		runtime: runtime, switchPrompts: make(map[string]*tokenSwitchPromptState), switchRounds: make(map[string]*tokenSwitchRound),
+		directorySwitches: make(map[string]*tokenSwitchContext), autoSwitchNotices: make(map[string]*PublicDogeTokenSwitchPrompt),
+	}
+	runtime.SetHealthChangedHandler(service.handleHealthChanged)
+	runtime.SetResultObservedHandler(service.handleUpstreamResult)
 	return service
 }
 
@@ -322,6 +368,10 @@ func (s *DesktopService) addStateChangedHandler(handler func()) {
 
 func (s *DesktopService) notifyStateChanged() {
 	s.mu.Lock()
+	if s.dogeAlertsSuppressed {
+		s.mu.Unlock()
+		return
+	}
 	handler := s.onStateChanged
 	handlers := append([]func(){}, s.stateChanged...)
 	s.mu.Unlock()
@@ -331,6 +381,14 @@ func (s *DesktopService) notifyStateChanged() {
 	for _, callback := range handlers {
 		callback()
 	}
+}
+
+// setDogeAlertsSuppressed 暂停绑定流程中的状态广播，避免首次绑定同步产生右下角提醒。
+// 记录仍正常写入 config.json；标记只存于当前进程，下一次同步或重启后提醒按持久化记录恢复。
+func (s *DesktopService) setDogeAlertsSuppressed(value bool) {
+	s.mu.Lock()
+	s.dogeAlertsSuppressed = value
+	s.mu.Unlock()
 }
 
 // setNeedsOnboarding 设置本次进程的首次启动引导状态；状态不写入配置，配置与用量文件存在后下次启动自然跳过。
@@ -494,12 +552,18 @@ func (s *DesktopService) GetState() DesktopState {
 		proxyURLs[category] = fmt.Sprintf("http://127.0.0.1:%d/%s", state.Config.ProxyPort, category)
 	}
 	publicSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
+	notificationSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
 	subscriptionsUSD := 0.0
 	for _, subscription := range state.Config.Doge.Subscriptions {
 		remaining := subscription.AmountTotal - subscription.AmountUsed
 		remainingUSD := dogeQuotaToUSD(remaining)
+		publicSubscription := PublicDogeSubscription{ID: subscription.ID, PlanID: subscription.PlanID, PlanTitle: subscription.PlanTitle, Status: subscription.Status, RemainingUSD: remainingUSD, EndTime: subscription.EndTime}
+		notificationSubscriptions = append(notificationSubscriptions, publicSubscription)
+		if !isDogeSubscriptionActive(subscription, time.Now()) {
+			continue
+		}
 		subscriptionsUSD += remainingUSD
-		publicSubscriptions = append(publicSubscriptions, PublicDogeSubscription{ID: subscription.ID, PlanID: subscription.PlanID, PlanTitle: subscription.PlanTitle, Status: subscription.Status, RemainingUSD: remainingUSD, EndTime: subscription.EndTime})
+		publicSubscriptions = append(publicSubscriptions, publicSubscription)
 	}
 	walletUSD := dogeQuotaToUSD(state.Config.Doge.Account.Quota)
 	account := PublicDogeAccount{
@@ -512,13 +576,16 @@ func (s *DesktopService) GetState() DesktopState {
 		WalletUSD: walletUSD, SubscriptionsUSD: subscriptionsUSD, TotalUSD: walletUSD + subscriptionsUSD,
 		Subscriptions: publicSubscriptions, RedemptionEnabled: state.Config.Doge.Topup.EnableRedemption, TopupLink: state.Config.Doge.Topup.TopupLink,
 		User: state.Config.Doge.User, Groups: append([]string(nil), state.Config.Doge.Groups...), Tokens: dogeTokens,
-		Notifications:       publicDogeNotifications(state.Config.Doge, walletUSD, publicSubscriptions, announcementSyncing),
+		Notifications:       publicDogeNotifications(state.Config.Doge, walletUSD, notificationSubscriptions, announcementSyncing),
+		BalanceAlertEnabled: state.Config.Doge.Notifications.BalanceAlertEnabled, BalanceAlertThresholdUSD: state.Config.Doge.Notifications.BalanceAlertThresholdUSD,
+		SubscriptionAlertEnabled: state.Config.Doge.Notifications.SubscriptionAlertEnabled, SubscriptionAlertThresholdUSD: state.Config.Doge.Notifications.SubscriptionAlertThresholdUSD,
 		Syncing:             dogeSyncing,
 		SyncPhase:           dogeSyncPhase,
 		AnnouncementSyncing: announcementSyncing,
 		SyncIntervalMinutes: state.Config.Doge.SyncIntervalMinutes, LastSyncError: state.Config.Doge.LastSyncError,
 	}
-	dogeState.TokenSwitch = s.buildDogeTokenSwitchPrompt()
+	dogeState.TokenSwitches = s.currentTokenSwitchPrompts()
+	dogeState.TokenSwitch = firstTokenSwitchPrompt(dogeState.TokenSwitches)
 	if !state.Config.Doge.LastSyncAt.IsZero() {
 		dogeState.LastSyncAt = state.Config.Doge.LastSyncAt.Format(time.RFC3339)
 	}
@@ -526,10 +593,315 @@ func (s *DesktopService) GetState() DesktopState {
 		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ProxyPort: state.Config.ProxyPort,
 		ProxyURL: proxyURLs[config.CategoryCodex], ProxyURLs: proxyURLs,
 		LocalAccessToken: state.Config.LocalAccessToken, ActiveProfiles: state.Config.ActiveProfiles,
-		Profiles: profiles, ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,
+		Profiles: profiles, FailoverOrder: config.NormalizeFailoverOrder(state.Config.FailoverOrder, state.Config.Profiles), ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,
 		Requests: s.runtime.RecentRecords(), Usage: s.runtime.UsageOverview(), UptimeSeconds: int64(s.runtime.Uptime().Seconds()),
-		Preferences: state.Config.Preferences, Doge: dogeState,
+		Preferences: state.Config.Preferences, TokenSwitch: state.Config.TokenSwitch, Doge: dogeState,
 	}
+}
+
+// handleHealthChanged 在健康阈值首次触发时执行自动切换；失败轮次耗尽后保留停止状态提醒。
+// 回调由 relay 在请求完成后调用，因此只改变后续请求使用的活动 Profile，不重放已经失败的请求。
+func (s *DesktopService) handleHealthChanged() {
+	s.failoverMu.Lock()
+	prompts := s.buildTokenSwitchPrompts()
+	previousIDs := make([]string, 0, len(prompts))
+	state := s.runtime.State()
+	if state != nil && state.Config.TokenSwitch.Mode == config.TokenSwitchModeAuto {
+		for _, category := range config.Categories {
+			prompt := prompts[category]
+			if switched, previousID := s.tryAutomaticTokenSwitch(prompt); switched {
+				previousIDs = append(previousIDs, previousID)
+			}
+		}
+	}
+	s.failoverMu.Unlock()
+	for _, previousID := range previousIDs {
+		s.runtime.ResetProfileHealth(previousID)
+	}
+	s.notifyStateChanged()
+}
+
+// handleUpstreamResult 在当前活动令牌真正成功后结束该类别的故障轮次。
+// 自动切换成功后的通知继续保留到用户确认；这里只清理尝试集合，使后续新故障可以开始新一轮。
+func (s *DesktopService) handleUpstreamResult(profileID, category string, status int, transportError bool) {
+	if transportError || status >= 400 || profileID == "" || category == "" {
+		return
+	}
+	state := s.runtime.State()
+	if state == nil || state.Config.ActiveProfiles[category] != profileID {
+		return
+	}
+	s.switchMu.Lock()
+	_, cleared := s.switchRounds[category]
+	if cleared {
+		delete(s.switchRounds, category)
+		for key := range s.switchPrompts {
+			if strings.HasPrefix(key, profileID+"|") {
+				delete(s.switchPrompts, key)
+			}
+		}
+	}
+	s.switchMu.Unlock()
+	if cleared {
+		s.notifyStateChanged()
+	}
+}
+
+// tryAutomaticTokenSwitch 在同一故障轮次中依次尝试未尝试的候选。
+// 候选切换失败也会计入尝试集合；全部候选耗尽后只生成一次停止提示，不再回到列表开头。
+func (s *DesktopService) tryAutomaticTokenSwitch(prompt *PublicDogeTokenSwitchPrompt) (bool, string) {
+	if prompt == nil {
+		return false, ""
+	}
+	s.ensureTokenSwitchRound(prompt.Category)
+	s.resumeTokenSwitchRound(prompt)
+	s.markTokenSwitchAttempt(prompt.Category, prompt.CurrentProfileID)
+	for _, candidate := range prompt.Candidates {
+		if !candidate.Selectable || candidate.ProfileID == "" {
+			continue
+		}
+		if s.tokenSwitchAttempted(prompt.Category, candidate.ProfileID) {
+			continue
+		}
+		s.markTokenSwitchAttempt(prompt.Category, candidate.ProfileID)
+		if err := s.switchProfile(prompt.Category, prompt.CurrentProfileID, candidate.ProfileID, tokenSwitchCurrentWasRemoved(s.runtime.State(), prompt)); err != nil {
+			continue
+		}
+		s.recordTokenSwitch(prompt.Category, prompt.CurrentName, candidate.Name, historyFailureMessage(prompt))
+		s.clearSwitchPrompt(prompt.Key)
+		s.setAutoSwitchNotice(prompt, candidate.Name)
+		return true, prompt.CurrentProfileID
+	}
+
+	s.stopTokenSwitchRound(prompt)
+	return false, ""
+}
+
+// resumeTokenSwitchRound 只在真正准备自动尝试且出现未尝试候选时恢复已停止轮次。
+// 状态读取和窗口渲染不得修改轮次，避免配置保存通知与自动执行之间短暂显示错误模式。
+func (s *DesktopService) resumeTokenSwitchRound(prompt *PublicDogeTokenSwitchPrompt) {
+	if prompt == nil {
+		return
+	}
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+	round := s.switchRounds[prompt.Category]
+	if round == nil || !round.Stopped {
+		return
+	}
+	hasCandidate := false
+	for _, candidate := range prompt.Candidates {
+		if candidate.Selectable && candidate.ProfileID != "" {
+			hasCandidate = true
+			break
+		}
+	}
+	if !hasCandidate {
+		return
+	}
+	round.Stopped = false
+	round.StoppedAt = time.Time{}
+	round.StopMessage = ""
+	delete(s.autoSwitchNotices, prompt.Category)
+}
+
+func (s *DesktopService) ensureTokenSwitchRound(category string) *tokenSwitchRound {
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+	if s.switchRounds == nil {
+		s.switchRounds = make(map[string]*tokenSwitchRound)
+	}
+	round := s.switchRounds[category]
+	if round == nil {
+		round = &tokenSwitchRound{AttemptedIDs: make(map[string]struct{})}
+		s.switchRounds[category] = round
+	}
+	return round
+}
+
+func (s *DesktopService) markTokenSwitchAttempt(category, profileID string) {
+	if strings.TrimSpace(profileID) == "" {
+		return
+	}
+	round := s.ensureTokenSwitchRound(category)
+	s.switchMu.Lock()
+	if round.AttemptedIDs == nil {
+		round.AttemptedIDs = make(map[string]struct{})
+	}
+	round.AttemptedIDs[profileID] = struct{}{}
+	s.switchMu.Unlock()
+}
+
+func (s *DesktopService) tokenSwitchAttempted(category, profileID string) bool {
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+	round := s.switchRounds[category]
+	if round == nil {
+		return false
+	}
+	_, ok := round.AttemptedIDs[profileID]
+	return ok
+}
+
+func (s *DesktopService) recordTokenSwitch(category, fromName, toName, failureMessage string) {
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+	round := s.switchRounds[category]
+	if round == nil {
+		return
+	}
+	round.History = append(round.History, PublicDogeTokenSwitchHistory{
+		FromName: fromName, ToName: toName, SwitchedAt: time.Now().Format("2006-01-02 15:04:05"), FailureMessage: failureMessage,
+	})
+}
+
+func (s *DesktopService) stopTokenSwitchRound(prompt *PublicDogeTokenSwitchPrompt) {
+	if prompt == nil {
+		return
+	}
+	switchMu := &s.switchMu
+	switchMu.Lock()
+	if s.switchRounds == nil {
+		s.switchRounds = make(map[string]*tokenSwitchRound)
+	}
+	round := s.switchRounds[prompt.Category]
+	if round == nil {
+		round = &tokenSwitchRound{AttemptedIDs: make(map[string]struct{})}
+		s.switchRounds[prompt.Category] = round
+	}
+	if !round.Stopped {
+		round.History = append(round.History, PublicDogeTokenSwitchHistory{
+			FromName:       prompt.CurrentName,
+			SwitchedAt:     time.Now().Format("2006-01-02 15:04:05"),
+			FailureMessage: historyFailureMessage(prompt),
+		})
+	}
+	round.Stopped = true
+	round.StoppedAt = time.Now()
+	round.StopMessage = fmt.Sprintf("当前类别暂无可用令牌，已停止自动切换，避免重复使用故障令牌。")
+	notice := *prompt
+	notice.Mode = "auto"
+	notice.Stopped = true
+	notice.StoppedAt = round.StoppedAt.Format("2006-01-02 15:04:05")
+	notice.StopMessage = round.StopMessage
+	notice.Message = "本轮令牌均已尝试，自动切换已停止。"
+	notice.Candidates = nil
+	notice.SwitchHistory = append([]PublicDogeTokenSwitchHistory(nil), round.History...)
+	if s.autoSwitchNotices == nil {
+		s.autoSwitchNotices = make(map[string]*PublicDogeTokenSwitchPrompt)
+	}
+	s.autoSwitchNotices[prompt.Category] = &notice
+	switchMu.Unlock()
+}
+
+func historyFailureMessage(prompt *PublicDogeTokenSwitchPrompt) string {
+	if prompt == nil {
+		return "上游请求异常"
+	}
+	switch prompt.FailureKind {
+	case "auth":
+		return fmt.Sprintf("连续 %d 次返回 HTTP %d", prompt.FailureCount, prompt.FailureStatus)
+	case "directory":
+		if prompt.Message != "" {
+			return prompt.Message
+		}
+		return "令牌目录状态异常"
+	default:
+		return fmt.Sprintf("%d 分钟内累计 %d 次上游异常", promptFailureWindow(prompt), prompt.FailureCount)
+	}
+}
+
+func promptFailureWindow(prompt *PublicDogeTokenSwitchPrompt) int {
+	if prompt == nil || prompt.FailureWindowMinutes <= 0 {
+		return config.DefaultUpstreamFailureWindowMinutes
+	}
+	return prompt.FailureWindowMinutes
+}
+
+func (s *DesktopService) clearSwitchPrompt(key string) {
+	s.switchMu.Lock()
+	delete(s.switchPrompts, key)
+	for category, context := range s.directorySwitches {
+		if context != nil && context.key == key {
+			delete(s.directorySwitches, category)
+		}
+	}
+	s.switchMu.Unlock()
+}
+
+// currentTokenSwitchPrompts 返回每个类别当前应显示的独立令牌状态。
+// 同类别自动切换结果覆盖该类别的手动提示，其他类别互不覆盖；所有状态只在本次运行内保留。
+func (s *DesktopService) currentTokenSwitchPrompts() map[string]*PublicDogeTokenSwitchPrompt {
+	prompts := s.buildTokenSwitchPrompts()
+	state := s.runtime.State()
+	if state == nil || state.Config.TokenSwitch.Mode != config.TokenSwitchModeAuto {
+		return prompts
+	}
+	s.switchMu.Lock()
+	for category, notice := range s.autoSwitchNotices {
+		if notice == nil {
+			continue
+		}
+		clone := *notice
+		clone.SwitchHistory = append([]PublicDogeTokenSwitchHistory(nil), notice.SwitchHistory...)
+		prompts[category] = &clone
+	}
+	s.switchMu.Unlock()
+	return prompts
+}
+
+func firstTokenSwitchPrompt(prompts map[string]*PublicDogeTokenSwitchPrompt) *PublicDogeTokenSwitchPrompt {
+	for _, category := range config.Categories {
+		if prompt := prompts[category]; prompt != nil {
+			return prompt
+		}
+	}
+	return nil
+}
+
+// setAutoSwitchNotice 保存自动切换成功结果，供独立令牌提醒窗口渲染。
+// prompt 来自切换前的候选快照，targetName 必须是经过统一格式化的目标名称。
+func (s *DesktopService) setAutoSwitchNotice(prompt *PublicDogeTokenSwitchPrompt, targetName string) {
+	if prompt == nil {
+		return
+	}
+	notice := *prompt
+	notice.Mode = "auto"
+	notice.SwitchedToName = strings.TrimSpace(targetName)
+	notice.Message = autoSwitchMessage(prompt, notice.SwitchedToName)
+	notice.Candidates = nil
+	s.switchMu.Lock()
+	if round := s.switchRounds[prompt.Category]; round != nil {
+		notice.SwitchHistory = append([]PublicDogeTokenSwitchHistory(nil), round.History...)
+		notice.Stopped = round.Stopped
+		notice.StoppedAt = ""
+		notice.StopMessage = round.StopMessage
+	}
+	if s.autoSwitchNotices == nil {
+		s.autoSwitchNotices = make(map[string]*PublicDogeTokenSwitchPrompt)
+	}
+	s.autoSwitchNotices[prompt.Category] = &notice
+	s.switchMu.Unlock()
+}
+
+func autoSwitchMessage(prompt *PublicDogeTokenSwitchPrompt, targetName string) string {
+	currentName := prompt.CurrentName
+	if currentName == "" {
+		currentName = "当前代理 API"
+	}
+	if targetName == "" {
+		targetName = "下一个可用令牌"
+	}
+	var failure string
+	switch prompt.FailureKind {
+	case "auth":
+		failure = fmt.Sprintf("连续 %d 次返回 HTTP %d，已达到故障阈值。", prompt.FailureCount, prompt.FailureStatus)
+	case "directory":
+		failure = "已从最新令牌目录中消失，已达到故障阈值。"
+	default:
+		failure = fmt.Sprintf("在设定的异常统计窗口内出现 %d 次上游异常，已达到故障阈值。", prompt.FailureCount)
+	}
+	return fmt.Sprintf("当前 %s %s\n已自动切换至 %s。", currentName, failure, targetName)
 }
 
 // CompleteOnboarding 结束首次启动引导并启用便携数据持久化；跳过和绑定成功都调用此方法。
@@ -541,24 +913,24 @@ func (s *DesktopService) CompleteOnboarding() error {
 	return nil
 }
 
-// buildDogeTokenSwitchPrompt 根据运行时健康快照构建当前唯一的令牌切换提示。
-// 只观察活动的二狗子 Profile；候选令牌复用主窗口类别下的可用令牌集合。
-// 用户取消后的抑制状态只保存在内存中，失败状态恢复后会被清理，下一次新的阈值事件可以再次提示。
+// buildDogeTokenSwitchPrompt 保留原绑定名称，实际构建所有来源共用的令牌切换提示。
 func (s *DesktopService) buildDogeTokenSwitchPrompt() *PublicDogeTokenSwitchPrompt {
-	state := s.runtime.State()
-	if state == nil || strings.TrimSpace(state.Config.Doge.AccessToken) == "" {
-		return nil
-	}
+	return s.buildTokenSwitchPrompt()
+}
 
-	profilesByRemoteID := make(map[int64]config.Profile)
-	for _, profile := range state.Config.Profiles {
-		if profile.Source == config.SourceDoge && profile.RemoteTokenID > 0 {
-			profilesByRemoteID[profile.RemoteTokenID] = profile
-		}
-	}
-	byID := make(map[int64]config.DogeToken, len(state.Config.Doge.Tokens))
-	for _, token := range state.Config.Doge.Tokens {
-		byID[token.ID] = token
+// buildTokenSwitchPrompt 保留单条提示入口，供现有调用和测试读取类别顺序中的第一条提示。
+func (s *DesktopService) buildTokenSwitchPrompt() *PublicDogeTokenSwitchPrompt {
+	return firstTokenSwitchPrompt(s.buildTokenSwitchPrompts())
+}
+
+// buildTokenSwitchPrompts 根据运行时健康快照和二狗子目录状态为每个类别构建一条提示。
+// 候选只限制当前 API 类别，来源不参与筛选；顺序来自该类别的 FailoverOrder。
+// 用户取消后的抑制状态只保存在内存中，失败状态恢复后会被清理。
+func (s *DesktopService) buildTokenSwitchPrompts() map[string]*PublicDogeTokenSwitchPrompt {
+	result := make(map[string]*PublicDogeTokenSwitchPrompt)
+	state := s.runtime.State()
+	if state == nil {
+		return result
 	}
 
 	snapshots := s.runtime.HealthSnapshots()
@@ -568,10 +940,15 @@ func (s *DesktopService) buildDogeTokenSwitchPrompt() *PublicDogeTokenSwitchProm
 	}
 	contexts := make([]triggeredContext, 0, len(snapshots))
 	activeKeys := make(map[string]struct{}, len(snapshots))
-	if directoryContext := s.dogeDirectorySwitchContext(); directoryContext != nil &&
-		state.Config.ActiveProfiles[directoryContext.profile.Category] == directoryContext.profile.ID {
-		activeKeys[directoryContext.key] = struct{}{}
-		contexts = append(contexts, triggeredContext{context: *directoryContext, priority: -1})
+	for _, directoryContext := range s.dogeDirectorySwitchContexts() {
+		if directoryContext != nil && directoryTriggerEnabled(state.Config.TokenSwitch, directoryContext.directoryReason) &&
+			directorySwitchContextApplies(state.Config, directoryContext) {
+			directoryContext.tokens = append([]config.DogeToken(nil), state.Config.Doge.Tokens...)
+			directoryContext.groups = append([]string(nil), state.Config.Doge.Groups...)
+			directoryContext.candidateProfiles = directoryFailoverCandidates(state.Config, directoryContext)
+			activeKeys[directoryContext.key] = struct{}{}
+			contexts = append(contexts, triggeredContext{context: *directoryContext, priority: -1})
+		}
 	}
 	for _, health := range snapshots {
 		failureKind, failureCount, priority := "", 0, 0
@@ -588,19 +965,17 @@ func (s *DesktopService) buildDogeTokenSwitchPrompt() *PublicDogeTokenSwitchProm
 			continue
 		}
 		profile := state.Config.Profiles[profileIndex]
-		if profile.Source != config.SourceDoge || profile.RemoteTokenID <= 0 || state.Config.ActiveProfiles[profile.Category] != profile.ID {
+		if state.Config.ActiveProfiles[profile.Category] != profile.ID {
 			continue
 		}
-		current, ok := byID[profile.RemoteTokenID]
-		if !ok {
-			continue
-		}
-		key := profile.ID + "|" + failureKind + "|" + strconv.FormatUint(health.TriggerGeneration, 10)
+		key := profile.ID + "|" + failureKind + "|" + strconv.Itoa(health.LastStatus) + "|" + strconv.FormatUint(health.TriggerGeneration, 10)
 		activeKeys[key] = struct{}{}
 		ctx := tokenSwitchContext{
 			key: key, failureKind: failureKind, failureCount: failureCount, failureStatus: health.LastStatus,
-			health: health, profile: profile, token: current, profilesByID: profilesByRemoteID,
-			tokens: state.Config.Doge.Tokens, groups: state.Config.Doge.Groups,
+			failureWindowMinutes: state.Config.TokenSwitch.UpstreamFailureWindowMinutes,
+			health:               health, profile: profile, token: dogeTokenForProfile(state.Config, profile),
+			tokens: append([]config.DogeToken(nil), state.Config.Doge.Tokens...), groups: append([]string(nil), state.Config.Doge.Groups...),
+			candidateProfiles: s.failoverCandidates(profile.Category, profile.ID, state.Config.TokenSwitch.Loop),
 		}
 		contexts = append(contexts, triggeredContext{context: ctx, priority: priority})
 	}
@@ -616,47 +991,135 @@ func (s *DesktopService) buildDogeTokenSwitchPrompt() *PublicDogeTokenSwitchProm
 		if dismissed, ok := switchPromptStates[item.context.key]; ok && dismissed {
 			continue
 		}
-		return publicDogeTokenSwitchPrompt(item.context)
+		category := item.context.profile.Category
+		if result[category] == nil {
+			result[category] = s.applyTokenSwitchRound(publicDogeTokenSwitchPrompt(item.context), state.Config.TokenSwitch.Mode == config.TokenSwitchModeAuto)
+		}
 	}
-	return nil
+	return result
 }
 
-// dogeDirectorySwitchContext 返回同步目录检测生成的运行时提示快照。
-// 快照保留同步前当前令牌的信息，使令牌从新目录消失后仍能按当前类别筛选候选；不写入配置文件。
-func (s *DesktopService) dogeDirectorySwitchContext() *tokenSwitchContext {
-	s.switchMu.Lock()
-	defer s.switchMu.Unlock()
-	if s.directorySwitch == nil {
+// applyTokenSwitchRound 只在自动模式下合并当前类别的历史并过滤本轮已尝试候选。
+// 手动提示不属于自动故障轮次，用户每次收到提示时都能按当前列表选择任意可用候选。
+func (s *DesktopService) applyTokenSwitchRound(prompt *PublicDogeTokenSwitchPrompt, automatic bool) *PublicDogeTokenSwitchPrompt {
+	if prompt == nil {
 		return nil
 	}
-	context := *s.directorySwitch
-	context.tokens = append([]config.DogeToken(nil), s.directorySwitch.tokens...)
-	context.groups = append([]string(nil), s.directorySwitch.groups...)
-	context.profilesByID = make(map[int64]config.Profile, len(s.directorySwitch.profilesByID))
-	for id, profile := range s.directorySwitch.profilesByID {
-		context.profilesByID[id] = profile
+	if !automatic {
+		return prompt
 	}
-	return &context
+	s.switchMu.Lock()
+	defer s.switchMu.Unlock()
+	round := s.switchRounds[prompt.Category]
+	if round == nil {
+		return prompt
+	}
+	filtered := make([]PublicDogeTokenSwitchCandidate, 0, len(prompt.Candidates))
+	for _, candidate := range prompt.Candidates {
+		if _, attempted := round.AttemptedIDs[candidate.ProfileID]; attempted {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	prompt.Candidates = filtered
+	prompt.SwitchHistory = append([]PublicDogeTokenSwitchHistory(nil), round.History...)
+	prompt.Stopped = round.Stopped
+	if !round.Stopped && len(filtered) == 0 {
+		prompt.Stopped = true
+	}
+	if round.Stopped || prompt.Stopped {
+		prompt.StopMessage = round.StopMessage
+		if prompt.StopMessage == "" {
+			prompt.StopMessage = "当前类别暂无可用令牌，已停止自动切换，避免重复使用故障令牌。"
+		}
+	}
+	return prompt
 }
 
-// setDogeDirectorySwitchContext 替换自动同步检测到的目录失效提示。
-// 提示 key 在同一活动令牌持续失效期间保持稳定，用户取消后沿用现有五分钟及持续期间抑制规则。
-func (s *DesktopService) setDogeDirectorySwitchContext(context *tokenSwitchContext) {
+// dogeDirectorySwitchContexts 返回按类别保存的目录失效快照。
+// 快照只保留同步前当前令牌和顺序锚点；候选始终按调用时配置重算，且这些状态都不写入配置文件。
+func (s *DesktopService) dogeDirectorySwitchContexts() map[string]*tokenSwitchContext {
 	s.switchMu.Lock()
-	previousKey := ""
-	if s.directorySwitch != nil {
-		previousKey = s.directorySwitch.key
+	defer s.switchMu.Unlock()
+	result := make(map[string]*tokenSwitchContext, len(s.directorySwitches))
+	for category, source := range s.directorySwitches {
+		if source == nil {
+			continue
+		}
+		context := *source
+		context.tokens = append([]config.DogeToken(nil), source.tokens...)
+		context.groups = append([]string(nil), source.groups...)
+		context.candidateProfiles = append([]config.Profile(nil), source.candidateProfiles...)
+		context.failoverOrder = append([]string(nil), source.failoverOrder...)
+		context.profilesByID = make(map[int64]config.Profile, len(source.profilesByID))
+		for id, profile := range source.profilesByID {
+			context.profilesByID[id] = profile
+		}
+		result[category] = &context
 	}
-	nextKey := ""
-	if context != nil {
-		nextKey = context.key
+	return result
+}
+
+// setDogeDirectorySwitchContexts 替换自动同步检测到的各类别目录失效提示。
+// 提示 key 在同一活动令牌持续失效期间保持稳定，用户取消后沿用现有五分钟及持续期间抑制规则。
+func (s *DesktopService) setDogeDirectorySwitchContexts(contexts map[string]*tokenSwitchContext) {
+	state := s.runtime.State()
+	s.switchMu.Lock()
+	previousKeys := make(map[string]string, len(s.directorySwitches))
+	for category, context := range s.directorySwitches {
+		if context != nil {
+			previousKeys[category] = context.key
+		}
 	}
-	changed := previousKey != nextKey
-	s.directorySwitch = context
+	s.directorySwitches = make(map[string]*tokenSwitchContext, len(contexts))
+	changed := len(previousKeys) != len(contexts)
+	for category, context := range contexts {
+		if context == nil {
+			continue
+		}
+		s.directorySwitches[category] = context
+		if previousKeys[category] != context.key {
+			changed = true
+		}
+	}
 	s.switchMu.Unlock()
-	if changed || context != nil {
+	for _, context := range contexts {
+		if context != nil {
+			state = s.runtime.State()
+			if state != nil && state.Config.TokenSwitch.Mode == config.TokenSwitchModeAuto &&
+				directoryTriggerEnabled(state.Config.TokenSwitch, context.directoryReason) &&
+				directorySwitchContextApplies(state.Config, context) {
+				current := *context
+				current.tokens = append([]config.DogeToken(nil), state.Config.Doge.Tokens...)
+				current.groups = append([]string(nil), state.Config.Doge.Groups...)
+				current.candidateProfiles = directoryFailoverCandidates(state.Config, &current)
+				prompt := s.applyTokenSwitchRound(publicDogeTokenSwitchPrompt(current), true)
+				s.failoverMu.Lock()
+				switched, previousID := s.tryAutomaticTokenSwitch(prompt)
+				s.failoverMu.Unlock()
+				if switched {
+					s.runtime.ResetProfileHealth(previousID)
+				}
+			}
+		}
+	}
+	if changed || len(contexts) > 0 {
 		s.notifyStateChanged()
 	}
+}
+
+// directorySwitchContextApplies 判断目录异常是否仍对应同步前的活动令牌。
+// 目录删除同步后 Profile 和启用映射已经清理，此时仅允许该 missing 快照继续完成一次手动或自动故障切换。
+func directorySwitchContextApplies(cfg config.AppConfig, context *tokenSwitchContext) bool {
+	if context == nil {
+		return false
+	}
+	category := context.profile.Category
+	if cfg.ActiveProfiles[category] == context.profile.ID {
+		return true
+	}
+	return context.directoryReason == dogeDirectoryFailureMissing &&
+		cfg.ActiveProfiles[category] == "" && config.FindProfileIndex(cfg.Profiles, context.profile.ID) < 0
 }
 
 // switchPromptStates 同步清理已经不再触发的提示状态，并返回当前仍允许展示的状态。
@@ -703,52 +1166,99 @@ func switchPromptBaseKey(key string) string {
 	return key
 }
 
-// publicDogeTokenSwitchPrompt 将内部令牌和 Profile 转为不含完整密钥的前端提示。
+// publicDogeTokenSwitchPrompt 将内部 Profile 转为不含完整密钥的前端提示；保留旧名称以兼容提醒窗口绑定。
 func publicDogeTokenSwitchPrompt(context tokenSwitchContext) *PublicDogeTokenSwitchPrompt {
 	currentName := strings.TrimSpace(context.profile.Name)
 	if currentName == "" {
 		currentName = context.token.Name
 	}
-	candidates := make([]PublicDogeTokenSwitchCandidate, 0)
-	for _, token := range availableDogeTokensForCategory(context.tokens, context.profilesByID, context.groups, context.profile.Category) {
-		if token.ID == context.token.ID {
-			continue
-		}
-		category := token.Category
-		profile, imported := context.profilesByID[token.ID]
-		if !config.IsCategory(category) {
-			continue
-		}
-		name := strings.TrimSpace(token.Name)
-		if imported && strings.TrimSpace(profile.Name) != "" {
-			name = strings.TrimSpace(profile.Name)
-		}
-		if name == "" {
-			name = "二狗子令牌 " + strconv.FormatInt(token.ID, 10)
-		}
-		group := dogeTokenDisplayGroup(token)
-		candidates = append(candidates, PublicDogeTokenSwitchCandidate{
-			TokenID: token.ID, ProfileID: profile.ID, Name: name, Source: "二狗子 API",
-			Group: group, Ratio: token.GroupRatio, Selectable: true,
-		})
-	}
-	failureMessage := fmt.Sprintf("当前令牌“%s”在 3 分钟内出现 %d 次上游异常。上游连续异常，是否尝试切换同类别的其他可用令牌？", currentName, context.failureCount)
-	if context.failureKind == "auth" {
-		failureMessage = fmt.Sprintf("当前令牌“%s”连续 %d 次返回 HTTP %d，是否切换同类别的其他可用令牌？", currentName, context.failureCount, context.failureStatus)
-	} else if context.failureKind == "directory" {
-		if context.directoryReason == dogeDirectoryFailureMissing {
-			failureMessage = fmt.Sprintf("当前令牌“%s”已从最新令牌目录中消失，是否切换同类别的其他可用令牌？", currentName)
-		} else {
-			failureMessage = fmt.Sprintf("当前令牌“%s”在最新令牌目录中已失效，是否切换同类别的其他可用令牌？", currentName)
-		}
+	if currentName == "" {
+		currentName = "当前代理 API"
 	}
 	currentGroup := dogeTokenDisplayGroup(context.token)
+	currentName = formatNonHomeProfileName(currentName, context.profile.Source, currentGroup, context.token.GroupRatio)
+	candidates := make([]PublicDogeTokenSwitchCandidate, 0)
+	profiles := context.candidateProfiles
+	for _, profile := range profiles {
+		if profile.ID == context.profile.ID {
+			continue
+		}
+		token := context.token
+		if profile.Source == config.SourceDoge {
+			for _, candidateToken := range context.tokens {
+				if candidateToken.ID == profile.RemoteTokenID {
+					token = candidateToken
+					break
+				}
+			}
+		}
+		name := strings.TrimSpace(profile.Name)
+		if name == "" {
+			name = "代理 API " + profile.ID
+		}
+		group := ""
+		ratio := float64(0)
+		tokenID := int64(0)
+		if profile.Source == config.SourceDoge {
+			tokenID = profile.RemoteTokenID
+			group = dogeTokenDisplayGroup(token)
+			ratio = token.GroupRatio
+		}
+		name = formatNonHomeProfileName(name, profile.Source, group, ratio)
+		candidates = append(candidates, PublicDogeTokenSwitchCandidate{
+			TokenID: tokenID, ProfileID: profile.ID, Name: name, Source: failoverSourceLabel(profile.Source),
+			Group: group, Ratio: ratio, Selectable: true,
+		})
+	}
+	failureWindow := context.failureWindowMinutes
+	if failureWindow <= 0 {
+		failureWindow = config.DefaultUpstreamFailureWindowMinutes
+	}
+	failureMessage := fmt.Sprintf("当前代理 API“%s”在 %d 分钟内出现 %d 次上游异常，是否切换到列表中的下一个可用项？", currentName, failureWindow, context.failureCount)
+	if context.failureKind == "auth" {
+		failureMessage = fmt.Sprintf("当前代理 API“%s”连续 %d 次返回 HTTP %d，是否切换到列表中的下一个可用项？", currentName, context.failureCount, context.failureStatus)
+	} else if context.failureKind == "directory" {
+		if context.directoryReason == dogeDirectoryFailureMissing {
+			failureMessage = fmt.Sprintf("当前令牌“%s”已从最新令牌目录中消失，是否切换到列表中的下一个可用项？", currentName)
+		} else {
+			failureMessage = fmt.Sprintf("当前令牌“%s”在最新令牌目录中已失效，是否切换到列表中的下一个可用项？", currentName)
+		}
+	}
 	return &PublicDogeTokenSwitchPrompt{
-		Key: context.key, Category: context.profile.Category, FailureKind: context.failureKind,
-		FailureCount: context.failureCount, FailureStatus: context.failureStatus, CurrentTokenID: context.token.ID,
+		Key: context.key, Category: context.profile.Category, Mode: "manual", FailureKind: context.failureKind,
+		FailureCount: context.failureCount, FailureStatus: context.failureStatus, FailureWindowMinutes: failureWindow, CurrentTokenID: context.token.ID, CurrentProfileID: context.profile.ID,
 		CurrentName: currentName, CurrentGroup: currentGroup, CurrentRatio: context.token.GroupRatio,
 		Message: failureMessage, Candidates: candidates,
 	}
+}
+
+// formatNonHomeProfileName 统一托盘、提醒窗口和统计页等非主页位置的 Profile 名称。
+// 主界面与编辑器仍使用原始名称；自定义 API 没有二狗子分组和倍率，只追加固定来源说明。
+func formatNonHomeProfileName(name, source, group string, ratio float64) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "未命名令牌"
+	}
+	if source == config.SourceCustom {
+		return fmt.Sprintf("%s（自定义 API）", name)
+	}
+	return formatDogeProfileName(name, group, ratio)
+}
+
+// formatDogeProfileName 统一非主页位置的二狗子令牌名称；主界面列表仍分别展示名称、分组和倍率标签。
+func formatDogeProfileName(name, group string, ratio float64) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "未命名令牌"
+	}
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return name
+	}
+	if ratio > 0 {
+		return fmt.Sprintf("%s (%s·%s)", name, group, formatDogeRatio(ratio))
+	}
+	return fmt.Sprintf("%s (%s)", name, group)
 }
 
 func publicDogeNotifications(connection config.DogeConnection, walletUSD float64, subscriptions []PublicDogeSubscription, syncing bool) PublicDogeNotifications {
@@ -759,6 +1269,18 @@ func publicDogeNotifications(connection config.DogeConnection, walletUSD float64
 	dismissed := make(map[string]struct{}, len(connection.Notifications.DismissedAlertKeys))
 	for _, key := range connection.Notifications.DismissedAlertKeys {
 		dismissed[key] = struct{}{}
+	}
+	balanceRecords := make(map[int64]config.DogeBalanceAlertRecord, len(connection.Notifications.BalanceAlertRecords))
+	for _, record := range connection.Notifications.BalanceAlertRecords {
+		if record.AccountID > 0 {
+			balanceRecords[record.AccountID] = record
+		}
+	}
+	subscriptionRecords := make(map[int64]config.DogeSubscriptionAlertRecord, len(connection.Notifications.SubscriptionAlertRecords))
+	for _, record := range connection.Notifications.SubscriptionAlertRecords {
+		if record.SubscriptionID > 0 {
+			subscriptionRecords[record.SubscriptionID] = record
+		}
 	}
 	publicAnnouncements := make([]PublicDogeAnnouncement, 0, len(connection.Notifications.Announcements))
 	unread := 0
@@ -785,25 +1307,48 @@ func publicDogeNotifications(connection config.DogeConnection, walletUSD float64
 			alerts = append(alerts, PublicDogeAlert{Kind: NotificationKindAnnouncement, Key: key, Title: "新的系统公告", Message: "平台发布了新的公告", AnnouncementID: announcement.ID})
 		}
 	}
-	if connection.Account.ID > 0 && walletUSD <= dogeLowQuotaThresholdUSD {
+	if connection.Notifications.BalanceAlertEnabled && connection.Account.ID > 0 && walletUSD < connection.Notifications.BalanceAlertThresholdUSD {
 		key := balanceAlertKey(connection.Account.ID)
-		if _, ok := dismissed[key]; !ok {
+		record, tracked := balanceRecords[connection.Account.ID]
+		if !tracked {
+			_, tracked = dismissed[key]
+			record.Acknowledged = tracked
+		}
+		if tracked && !record.Acknowledged {
 			alerts = append(alerts, PublicDogeAlert{Kind: NotificationKindBalance, Key: key, Title: "余额提醒", Message: fmt.Sprintf("钱包余额仅剩 %s", formatDogeUSDValue(walletUSD)), AmountUSD: walletUSD})
 		}
 	}
 	for _, subscription := range subscriptions {
-		if subscription.Status != "active" || subscription.RemainingUSD > dogeLowQuotaThresholdUSD {
+		if !connection.Notifications.SubscriptionAlertEnabled {
 			continue
 		}
 		key := subscriptionAlertKey(subscription.ID)
-		if _, ok := dismissed[key]; ok {
-			continue
+		record, tracked := subscriptionRecords[subscription.ID]
+		if !tracked {
+			_, tracked = dismissed[key]
+			record.Acknowledged = tracked
 		}
 		label := subscription.PlanTitle
 		if strings.TrimSpace(label) == "" {
 			label = fmt.Sprintf("套餐 %d", subscription.PlanID)
 		}
-		alerts = append(alerts, PublicDogeAlert{Kind: NotificationKindSubscription, Key: key, Title: "套餐提醒", Message: fmt.Sprintf("%s 剩余 %s", label, formatDogeUSDValue(subscription.RemainingUSD)), AmountUSD: subscription.RemainingUSD})
+		if tracked && !record.Acknowledged {
+			state := record.State
+			if state == "" {
+				state = subscriptionAlertStateLowBalance
+			}
+			title := "套餐余额提醒"
+			message := fmt.Sprintf("%s 剩余 %s", label, formatDogeUSDValue(subscription.RemainingUSD))
+			if state == subscriptionAlertStateExpiringSoon {
+				hours := time.Until(time.Unix(subscription.EndTime, 0)).Hours()
+				title = "套餐即将过期"
+				message = fmt.Sprintf("%s 将在 %s 内过期，当前剩余 %s，请及时使用。", label, formatDogeDuration(hours), formatDogeUSDValue(subscription.RemainingUSD))
+			} else if state == subscriptionAlertStateExpired {
+				title = "套餐已过期"
+				message = fmt.Sprintf("%s 已过期，剩余金额 %s。", label, formatDogeUSDValue(subscription.RemainingUSD))
+			}
+			alerts = append(alerts, PublicDogeAlert{Kind: NotificationKindSubscription, Key: key, Title: title, Message: message, AmountUSD: subscription.RemainingUSD})
+		}
 	}
 	lastSyncAt := ""
 	if !connection.Notifications.LastAnnouncementSyncAt.IsZero() {
@@ -832,12 +1377,27 @@ func formatDogeUSDValue(value float64) string {
 	return fmt.Sprintf("$%.2f", value)
 }
 
+func formatDogeDuration(hours float64) string {
+	if hours < 1 {
+		minutes := int(math.Ceil(hours * 60))
+		if minutes < 1 {
+			minutes = 1
+		}
+		return fmt.Sprintf("%d 分钟", minutes)
+	}
+	return fmt.Sprintf("%.1f 小时", hours)
+}
+
 func balanceAlertKey(userID int64) string {
 	return fmt.Sprintf("balance:%d", userID)
 }
 
 func subscriptionAlertKey(subscriptionID int64) string {
 	return fmt.Sprintf("subscription:%d", subscriptionID)
+}
+
+func subscriptionExpiredAlertKey(subscriptionID int64) string {
+	return fmt.Sprintf("subscription-expired:%d", subscriptionID)
 }
 
 func announcementAlertKey(announcementID int64) string {
@@ -898,16 +1458,22 @@ func (s *DesktopService) ReorderDogeTokens(orderKeys []string) error {
 	})
 }
 
-// SetDogeTokenCategories 保存用户为尚未导入令牌选择的本地 API 类别；远端 group 仍用于权限判断，display_name 只作为界面文案。
-// 已经导入的令牌不能通过该入口改类别，避免绕过编辑页导致启用映射与配置不一致。
+// SetDogeTokenCategories 校验整批选择后，将待导入令牌一次性创建为本地 Profile。
+// 新 Profile 按本批选择顺序追加到所属类别末尾；整批任一项无效时不保存部分结果。
 func (s *DesktopService) SetDogeTokenCategories(assignments []DogeTokenCategoryInput) error {
 	if len(assignments) == 0 {
 		return errors.New("至少选择一个二狗子令牌类别")
 	}
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		byID := make(map[int64]int, len(cfg.Doge.Tokens))
 		for index := range cfg.Doge.Tokens {
 			byID[cfg.Doge.Tokens[index].ID] = index
+		}
+		imported := make(map[int64]struct{})
+		for _, profile := range cfg.Profiles {
+			if profile.Source == config.SourceDoge && profile.RemoteTokenID > 0 {
+				imported[profile.RemoteTokenID] = struct{}{}
+			}
 		}
 		seen := make(map[int64]struct{}, len(assignments))
 		for _, assignment := range assignments {
@@ -925,15 +1491,45 @@ func (s *DesktopService) SetDogeTokenCategories(assignments []DogeTokenCategoryI
 			if !ok {
 				return fmt.Errorf("二狗子令牌 %d 不存在，请先刷新目录", assignment.ID)
 			}
-			for _, profile := range cfg.Profiles {
-				if profile.Source == config.SourceDoge && profile.RemoteTokenID == assignment.ID {
-					return fmt.Errorf("二狗子令牌 %d 已导入，不能通过同步弹窗修改类别", assignment.ID)
-				}
+			if _, exists := imported[assignment.ID]; exists {
+				return fmt.Errorf("二狗子令牌 %d 已导入，不能通过同步弹窗修改类别", assignment.ID)
 			}
-			cfg.Doge.Tokens[index].Category = assignment.Category
+			remote := cfg.Doge.Tokens[index]
+			remote.Key = normalizeDogeAPIKey(remote.Key)
+			if !isCompleteDogeAPIKey(remote.Key) {
+				return fmt.Errorf("二狗子令牌 %d 缺少完整 API 密钥，请先手动同步", assignment.ID)
+			}
 		}
+		for _, assignment := range assignments {
+			index := byID[assignment.ID]
+			cfg.Doge.Tokens[index].Category = assignment.Category
+			cfg.Profiles = append(cfg.Profiles, newDogeProfile(cfg, cfg.Doge.Tokens[index], assignment.Category))
+		}
+		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	s.handleHealthChanged()
+	return nil
+}
+
+// newDogeProfile 只负责把已经通过类别和完整密钥校验的目录令牌转换为本地 Profile。
+// 调用方必须在同一个配置事务中保存，避免令牌类别与 Profile 顺序分离。
+func newDogeProfile(cfg *config.AppConfig, remote config.DogeToken, category string) config.Profile {
+	name := strings.TrimSpace(remote.Name)
+	if name == "" {
+		name = "二狗子令牌 " + strconv.FormatInt(remote.ID, 10)
+	}
+	note := strings.TrimSpace(remote.Note)
+	if note == "" {
+		note = dogeTokenNote(remote)
+	}
+	return config.Profile{
+		ID: config.NewProfileID(), Source: config.SourceDoge, Category: category, Name: name,
+		BaseURL: strings.TrimRight(cfg.Doge.BaseURL, "/") + "/v1", APIKey: normalizeDogeAPIKey(remote.Key),
+		Note: note, RemoteTokenID: remote.ID,
+	}
 }
 
 func (s *DesktopService) ClearUsage() error {
@@ -944,6 +1540,8 @@ func (s *DesktopService) ClearUsage() error {
 	return nil
 }
 
+// SaveProfile 新增或更新一个本地 Profile，并规范化其类别故障顺序。
+// 保存成功后重新评估正在进行的自动轮次，使新 Profile 可以成为目录异常后的实时候选。
 func (s *DesktopService) SaveProfile(input ProfileInput) error {
 	input.Name = strings.TrimSpace(input.Name)
 	input.BaseURL = strings.TrimSpace(input.BaseURL)
@@ -954,7 +1552,7 @@ func (s *DesktopService) SaveProfile(input ProfileInput) error {
 		input.Headers = map[string]string{}
 	}
 	modelsOmitted := input.Models == nil
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		index := config.FindProfileIndex(cfg.Profiles, input.ID)
 		var previous config.Profile
 		if index >= 0 {
@@ -982,6 +1580,7 @@ func (s *DesktopService) SaveProfile(input ProfileInput) error {
 		}
 		if index >= 0 {
 			profile.RemoteTokenID = previous.RemoteTokenID
+			profile.SkipAutoSwitch = previous.SkipAutoSwitch
 		}
 		if index < 0 {
 			profile.ID = config.NewProfileID()
@@ -1011,8 +1610,29 @@ func (s *DesktopService) SaveProfile(input ProfileInput) error {
 		} else {
 			cfg.Profiles = append(cfg.Profiles, profile)
 		}
+		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	s.handleHealthChanged()
+	return nil
+}
+
+// SetProfileAutoSwitch 设置单个 Profile 是否参加自动故障切换；手动提示模式仍可选择该 Profile。
+func (s *DesktopService) SetProfileAutoSwitch(id string, enabled bool) error {
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		index := config.FindProfileIndex(cfg.Profiles, strings.TrimSpace(id))
+		if index < 0 {
+			return errors.New("代理 API 不存在")
+		}
+		cfg.Profiles[index].SkipAutoSwitch = !enabled
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.handleHealthChanged()
+	return nil
 }
 
 func (s *DesktopService) DeleteProfile(id string) error {
@@ -1026,20 +1646,42 @@ func (s *DesktopService) DeleteProfile(id string) error {
 		if cfg.ActiveProfiles[category] == id {
 			delete(cfg.ActiveProfiles, category)
 		}
+		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 		return nil
 	})
 }
 
+// ActivateProfile 启用指定 Profile；二狗子来源必须仍存在于最新目录且当前分组可用。
+// 成功后清理原活动 Profile 的失败统计，新请求立即读取新的运行时快照。
 func (s *DesktopService) ActivateProfile(id string) error {
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	state := s.runtime.State()
+	previousID := ""
+	if state != nil {
+		if index := config.FindProfileIndex(state.Config.Profiles, id); index >= 0 {
+			previousID = state.Config.ActiveProfiles[state.Config.Profiles[index].Category]
+		}
+	}
+	err := s.updateConfig(func(cfg *config.AppConfig) error {
 		index := config.FindProfileIndex(cfg.Profiles, id)
 		if index >= 0 {
 			profile := cfg.Profiles[index]
-			if profile.Source == config.SourceDoge && profile.RemoteTokenID > 0 {
+			if profile.Source == config.SourceDoge {
+				if profile.RemoteTokenID <= 0 {
+					return errors.New("二狗子令牌缺少有效的远端目录 ID，不能启用")
+				}
+				found := false
 				for _, token := range cfg.Doge.Tokens {
-					if token.ID == profile.RemoteTokenID && !dogeTokenAvailable(token, cfg.Doge.Groups) {
+					if token.ID != profile.RemoteTokenID {
+						continue
+					}
+					found = true
+					if !dogeTokenAvailable(token, cfg.Doge.Groups) {
 						return errors.New("二狗子令牌当前分组不可用，不能启用")
 					}
+					break
+				}
+				if !found {
+					return errors.New("二狗子令牌已不在最新目录中，请先同步")
 				}
 			}
 			if cfg.ActiveProfiles == nil {
@@ -1050,6 +1692,258 @@ func (s *DesktopService) ActivateProfile(id string) error {
 		}
 		return errors.New("代理 API 不存在")
 	})
+	if err != nil {
+		return err
+	}
+	if previousID != "" && previousID != id {
+		s.runtime.ResetProfileHealth(previousID)
+	}
+	return nil
+}
+
+func directoryTriggerEnabled(settings config.TokenSwitchSettings, reason string) bool {
+	if reason == dogeDirectoryFailureMissing {
+		return settings.TriggerDirectoryMissing
+	}
+	return settings.TriggerDirectoryInvalid
+}
+
+func (s *DesktopService) failoverCandidates(category, currentID string, loop bool) []config.Profile {
+	state := s.runtime.State()
+	if state == nil {
+		return nil
+	}
+	return failoverCandidatesFromConfig(state.Config, category, currentID, loop)
+}
+
+// failoverCandidatesFromConfig 按给定配置快照计算一个类别的后续候选。
+// 目录同步在删除当前 Profile 前调用它，既保留原列表位置，又使用最新目录过滤同时消失或失效的候选。
+func failoverCandidatesFromConfig(cfg config.AppConfig, category, currentID string, loop bool) []config.Profile {
+	ordered := config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)[category]
+	byID := make(map[string]config.Profile, len(cfg.Profiles))
+	for _, profile := range cfg.Profiles {
+		if profile.Category == category {
+			byID[profile.ID] = profile
+		}
+	}
+	start := -1
+	for index, id := range ordered {
+		if id == currentID {
+			start = index
+			break
+		}
+	}
+	if start < 0 {
+		start = -1
+	}
+	limit := len(ordered)
+	if !loop && start >= 0 {
+		limit -= start + 1
+	}
+	result := make([]config.Profile, 0, len(ordered))
+	for step := 1; step <= limit; step++ {
+		index := start + step
+		if loop {
+			index %= len(ordered)
+		}
+		if index < 0 || index >= len(ordered) || (loop && index == start) {
+			break
+		}
+		profile, ok := byID[ordered[index]]
+		if !ok || !failoverProfileAvailable(cfg, profile) {
+			continue
+		}
+		if cfg.TokenSwitch.Mode == config.TokenSwitchModeAuto && profile.SkipAutoSwitch {
+			continue
+		}
+		result = append(result, profile)
+	}
+	return result
+}
+
+// directoryFailoverCandidates 使用当前配置重算目录异常候选，仅从同步前顺序保留已删除当前项的位置。
+// 模式、循环、跳过状态、新增 Profile 和最新二狗子目录都以调用时快照为准，不能沿用发生异常时的候选列表。
+func directoryFailoverCandidates(cfg config.AppConfig, context *tokenSwitchContext) []config.Profile {
+	if context == nil {
+		return nil
+	}
+	candidateConfig := config.Clone(cfg)
+	category := context.profile.Category
+	currentID := context.profile.ID
+	if context.directoryReason == dogeDirectoryFailureMissing {
+		if config.FindProfileIndex(candidateConfig.Profiles, currentID) < 0 {
+			candidateConfig.Profiles = append(candidateConfig.Profiles, context.profile)
+		}
+		currentOrder := config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)[category]
+		anchoredOrder := insertMissingFailoverAnchor(currentOrder, context.failoverOrder, currentID)
+		if candidateConfig.FailoverOrder == nil {
+			candidateConfig.FailoverOrder = make(map[string][]string)
+		}
+		candidateConfig.FailoverOrder[category] = anchoredOrder
+	}
+	return failoverCandidatesFromConfig(candidateConfig, category, currentID, candidateConfig.TokenSwitch.Loop)
+}
+
+// insertMissingFailoverAnchor 把已删除当前项放回最新可见顺序中的原相对位置。
+// 优先使用仍存在的前一项，其次使用后一项；两侧都不存在时按原索引落位，使列表首尾语义保持稳定。
+func insertMissingFailoverAnchor(currentOrder, previousOrder []string, currentID string) []string {
+	result := append([]string(nil), currentOrder...)
+	for _, id := range result {
+		if id == currentID {
+			return result
+		}
+	}
+	previousIndex := -1
+	for index, id := range previousOrder {
+		if id == currentID {
+			previousIndex = index
+			break
+		}
+	}
+	positions := make(map[string]int, len(result))
+	for index, id := range result {
+		positions[id] = index
+	}
+	insertAt := -1
+	if previousIndex >= 0 {
+		for index := previousIndex - 1; index >= 0; index-- {
+			if position, ok := positions[previousOrder[index]]; ok {
+				insertAt = position + 1
+				break
+			}
+		}
+		if insertAt < 0 {
+			for index := previousIndex + 1; index < len(previousOrder); index++ {
+				if position, ok := positions[previousOrder[index]]; ok {
+					insertAt = position
+					break
+				}
+			}
+		}
+	}
+	if insertAt < 0 {
+		insertAt = previousIndex
+		if insertAt < 0 || insertAt > len(result) {
+			insertAt = len(result)
+		}
+	}
+	result = append(result, "")
+	copy(result[insertAt+1:], result[insertAt:])
+	result[insertAt] = currentID
+	return result
+}
+
+func availableFailoverProfiles(cfg config.AppConfig, category string) []config.Profile {
+	order := config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)[category]
+	byID := make(map[string]config.Profile, len(cfg.Profiles))
+	for _, profile := range cfg.Profiles {
+		if profile.Category == category {
+			byID[profile.ID] = profile
+		}
+	}
+	result := make([]config.Profile, 0, len(order))
+	for _, id := range order {
+		profile, ok := byID[id]
+		if ok && failoverProfileAvailable(cfg, profile) {
+			result = append(result, profile)
+		}
+	}
+	return result
+}
+
+func failoverProfileAvailable(cfg config.AppConfig, profile config.Profile) bool {
+	if strings.TrimSpace(profile.ID) == "" || strings.TrimSpace(profile.APIKey) == "" {
+		return false
+	}
+	if profile.Source != config.SourceDoge {
+		return true
+	}
+	if profile.RemoteTokenID <= 0 {
+		return false
+	}
+	for _, token := range cfg.Doge.Tokens {
+		if token.ID == profile.RemoteTokenID {
+			return dogeTokenSwitchable(token, cfg.Doge.Groups)
+		}
+	}
+	return false
+}
+
+func dogeTokenForProfile(cfg config.AppConfig, profile config.Profile) config.DogeToken {
+	if profile.Source != config.SourceDoge || profile.RemoteTokenID <= 0 {
+		return config.DogeToken{}
+	}
+	for _, token := range cfg.Doge.Tokens {
+		if token.ID == profile.RemoteTokenID {
+			return token
+		}
+	}
+	return config.DogeToken{ID: profile.RemoteTokenID, Name: profile.Name, Category: profile.Category}
+}
+
+func failoverSourceLabel(source string) string {
+	if source == config.SourceDoge {
+		return "二狗子 API"
+	}
+	return "自定义 API"
+}
+
+func dogeFailoverProfileID(tokenID int64) string {
+	return fmt.Sprintf("doge-token:%d", tokenID)
+}
+
+func dogeTokenIDFromFailoverProfileID(profileID string) (int64, bool) {
+	if !strings.HasPrefix(profileID, "doge-token:") {
+		return 0, false
+	}
+	tokenID, err := strconv.ParseInt(strings.TrimPrefix(profileID, "doge-token:"), 10, 64)
+	return tokenID, err == nil && tokenID > 0
+}
+
+// ReorderFailoverProfiles 保存指定类别的统一 Profile 顺序；来源不同的 Profile 可以在同一列表中相邻排列。
+// 前端只提交当前视图中的 Profile ID，后端保留未显示项并拒绝跨类别或未知 ID。
+func (s *DesktopService) ReorderFailoverProfiles(category string, ids []string) error {
+	category = strings.TrimSpace(category)
+	if !config.IsCategory(category) {
+		return errors.New("API 类别无效")
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		known := make(map[string]struct{})
+		for _, profile := range cfg.Profiles {
+			if profile.Category == category {
+				known[profile.ID] = struct{}{}
+			}
+		}
+		seen := make(map[string]struct{}, len(ids))
+		next := make([]string, 0, len(known))
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if _, ok := known[id]; !ok {
+				return errors.New("令牌切换顺序包含未知或跨类别 Profile")
+			}
+			if _, ok := seen[id]; ok {
+				return errors.New("令牌切换顺序包含重复 Profile")
+			}
+			seen[id] = struct{}{}
+			next = append(next, id)
+		}
+		for _, id := range config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)[category] {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			next = append(next, id)
+		}
+		if cfg.FailoverOrder == nil {
+			cfg.FailoverOrder = map[string][]string{}
+		}
+		cfg.FailoverOrder[category] = next
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.handleHealthChanged()
+	return nil
 }
 
 // DismissDogeTokenSwitch 在当前失败状态持续期间抑制令牌切换提示，并在失败恢复后的五分钟内继续抑制。
@@ -1061,113 +1955,149 @@ func (s *DesktopService) DismissDogeTokenSwitch(key string) error {
 	}
 	s.switchMu.Lock()
 	promptState, ok := s.switchPrompts[key]
+	autoNotice := false
+	for category, notice := range s.autoSwitchNotices {
+		if notice != nil && notice.Key == key {
+			delete(s.autoSwitchNotices, category)
+			autoNotice = true
+			break
+		}
+	}
 	if ok {
 		promptState.dismissed = true
 		promptState.suppressedUntil = time.Now().Add(5 * time.Minute)
 	}
 	s.switchMu.Unlock()
-	if !ok {
+	if !ok && !autoNotice {
 		return errors.New("令牌切换提示已失效")
 	}
 	s.notifyStateChanged()
 	return nil
 }
 
-// SwitchDogeToken 在服务端重新校验提示、类别和可用状态后启用候选令牌。
-// 前端只提交运行时提示 key 与远端令牌 ID，不能借此切换到其他类别或不可用令牌。
+// SwitchDogeToken 保留旧绑定入口；实际切换已提升为所有来源共用的 Profile 切换。
 func (s *DesktopService) SwitchDogeToken(key string, tokenID int64) error {
-	key = strings.TrimSpace(key)
-	if key == "" || tokenID <= 0 {
+	state := s.runtime.State()
+	if state == nil || tokenID <= 0 {
 		return errors.New("令牌切换参数无效")
 	}
-	prompt := s.buildDogeTokenSwitchPrompt()
-	if prompt == nil || prompt.Key != key {
+	for _, profile := range state.Config.Profiles {
+		if profile.Source == config.SourceDoge && profile.RemoteTokenID == tokenID {
+			return s.SwitchToken(key, profile.ID)
+		}
+	}
+	return s.SwitchToken(key, dogeFailoverProfileID(tokenID))
+}
+
+// SwitchToken 在服务端重新校验提示、类别、顺序和可用状态后启用候选 Profile。
+// 前端只提交运行时提示 key 与 Profile ID，不能借此切换到其他类别或不可用 Profile。
+func (s *DesktopService) SwitchToken(key, profileID string) error {
+	key = strings.TrimSpace(key)
+	profileID = strings.TrimSpace(profileID)
+	if key == "" || profileID == "" {
+		return errors.New("令牌切换参数无效")
+	}
+	s.failoverMu.Lock()
+	var prompt *PublicDogeTokenSwitchPrompt
+	for _, candidatePrompt := range s.buildTokenSwitchPrompts() {
+		if candidatePrompt != nil && candidatePrompt.Key == key {
+			prompt = candidatePrompt
+			break
+		}
+	}
+	if prompt == nil {
+		s.failoverMu.Unlock()
 		return errors.New("令牌切换提示已失效，请重新等待下一次异常")
 	}
+	found := false
+	for _, candidate := range prompt.Candidates {
+		if candidate.ProfileID == profileID && candidate.Selectable {
+			found = true
+			break
+		}
+	}
+	if !found {
+		s.failoverMu.Unlock()
+		return errors.New("候选 Profile 当前不可用")
+	}
+	if err := s.switchProfile(prompt.Category, prompt.CurrentProfileID, profileID, tokenSwitchCurrentWasRemoved(s.runtime.State(), prompt)); err != nil {
+		s.failoverMu.Unlock()
+		return err
+	}
+	s.clearSwitchPrompt(key)
+	s.failoverMu.Unlock()
+	s.runtime.ResetProfileHealth(prompt.CurrentProfileID)
+	s.notifyStateChanged()
+	return nil
+}
+
+// tokenSwitchCurrentWasRemoved 只为目录删除产生的有效提示放宽当前 Profile 校验。
+// 普通健康错误和目录禁用仍要求 ActiveProfiles 精确匹配，不能借过期提示启用任意候选。
+func tokenSwitchCurrentWasRemoved(state *relay.State, prompt *PublicDogeTokenSwitchPrompt) bool {
+	return state != nil && prompt != nil && prompt.FailureKind == "directory" &&
+		state.Config.ActiveProfiles[prompt.Category] == "" && config.FindProfileIndex(state.Config.Profiles, prompt.CurrentProfileID) < 0
+}
+
+func (s *DesktopService) switchProfile(category, currentID, candidateID string, allowRemovedCurrent bool) error {
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("程序尚未初始化")
 	}
-	profileID := state.Config.ActiveProfiles[prompt.Category]
-	profileIndex := config.FindProfileIndex(state.Config.Profiles, profileID)
-	if profileIndex < 0 || state.Config.Profiles[profileIndex].Source != config.SourceDoge {
-		return errors.New("当前类别没有活动的二狗子 API")
+	currentMatches := state.Config.ActiveProfiles[category] == currentID
+	currentWasRemoved := allowRemovedCurrent && state.Config.ActiveProfiles[category] == "" && config.FindProfileIndex(state.Config.Profiles, currentID) < 0
+	if !currentMatches && !currentWasRemoved {
+		return errors.New("当前代理 API 已发生变化，请重新等待下一次异常")
 	}
-	currentProfile := state.Config.Profiles[profileIndex]
-	var currentToken config.DogeToken
-	for _, token := range state.Config.Doge.Tokens {
-		if token.ID == prompt.CurrentTokenID {
-			currentToken = token
-			break
+	index := config.FindProfileIndex(state.Config.Profiles, candidateID)
+	candidateIsRemote := false
+	if index < 0 {
+		remoteID, ok := dogeTokenIDFromFailoverProfileID(candidateID)
+		if !ok {
+			return errors.New("候选 Profile 不存在或类别不匹配")
 		}
-	}
-	directoryContext := s.dogeDirectorySwitchContext()
-	directoryPrompt := prompt.FailureKind == "directory" && directoryContext != nil && directoryContext.key == key
-	if directoryPrompt && currentToken.ID == 0 {
-		currentToken = directoryContext.token
-	}
-	if currentToken.ID == 0 || currentToken.ID != currentProfile.RemoteTokenID {
-		return errors.New("当前令牌已刷新，请重新等待下一次异常")
-	}
-	var candidate config.DogeToken
-	found := false
-	for _, token := range state.Config.Doge.Tokens {
-		if token.ID == tokenID {
-			candidate, found = token, true
-			break
+		for _, token := range state.Config.Doge.Tokens {
+			if token.ID == remoteID && token.Category == category && dogeTokenSwitchable(token, state.Config.Doge.Groups) {
+				candidateIsRemote = true
+				break
+			}
 		}
-	}
-	if !found || candidate.ID == prompt.CurrentTokenID {
-		return errors.New("候选令牌不存在")
-	}
-	if candidate.Category == "" {
-		for _, imported := range state.Config.Profiles {
-			if imported.Source == config.SourceDoge && imported.RemoteTokenID == candidate.ID {
-				candidate.Category = imported.Category
+		if !candidateIsRemote {
+			return errors.New("候选令牌当前不可用")
+		}
+		if err := s.prepareDogeTokenProfile(remoteID, false); err != nil {
+			return err
+		}
+		state = s.runtime.State()
+		for candidateIndex, profile := range state.Config.Profiles {
+			if profile.Source == config.SourceDoge && profile.RemoteTokenID == remoteID && profile.Category == category {
+				index = candidateIndex
+				candidateID = profile.ID
 				break
 			}
 		}
 	}
-	profilesByRemoteID := make(map[int64]config.Profile)
-	for _, profile := range state.Config.Profiles {
-		if profile.Source == config.SourceDoge && profile.RemoteTokenID > 0 {
-			profilesByRemoteID[profile.RemoteTokenID] = profile
-		}
+	if index < 0 || state.Config.Profiles[index].Category != category {
+		return errors.New("候选 Profile 不存在或类别不匹配")
 	}
-	validCandidates := availableDogeTokensForCategory(state.Config.Doge.Tokens, profilesByRemoteID, state.Config.Doge.Groups, currentProfile.Category)
-	valid := false
-	for _, validCandidate := range validCandidates {
-		if validCandidate.ID == candidate.ID {
-			candidate = validCandidate
-			valid = true
-			break
-		}
+	candidate := state.Config.Profiles[index]
+	if !failoverProfileAvailable(state.Config, candidate) {
+		return errors.New("候选 Profile 当前不可用")
 	}
-	if !valid {
-		return errors.New("候选令牌当前不可用")
-	}
-	clientEntry := state.Config.ClientConfigs[currentProfile.Category]
-	if clientconfig.Supports(currentProfile.Category) && !clientEntry.SkipConfigReplacement {
-		candidateProfileID := ""
-		if profile, ok := profilesByRemoteID[candidate.ID]; ok {
-			candidateProfileID = profile.ID
-		}
-		if err := clientconfig.Configure(state.Config, currentProfile.Category, candidateProfileID); err != nil {
+	clientEntry := state.Config.ClientConfigs[category]
+	if clientconfig.Supports(category) && !clientEntry.SkipConfigReplacement {
+		if err := clientconfig.Configure(state.Config, category, candidate.ID); err != nil {
 			return fmt.Errorf("更新客户端配置失败: %w", err)
 		}
 	}
-	if err := s.EnableDogeToken(candidate.ID); err != nil {
-		return err
-	}
-	s.runtime.ResetProfileHealth(currentProfile.ID)
-	s.switchMu.Lock()
-	delete(s.switchPrompts, key)
-	if s.directorySwitch != nil && s.directorySwitch.key == key {
-		s.directorySwitch = nil
-	}
-	s.switchMu.Unlock()
-	s.notifyStateChanged()
-	return nil
+	return s.updateConfig(func(cfg *config.AppConfig) error {
+		currentMatches := cfg.ActiveProfiles[category] == currentID
+		currentWasRemoved := allowRemovedCurrent && cfg.ActiveProfiles[category] == "" && config.FindProfileIndex(cfg.Profiles, currentID) < 0
+		if !currentMatches && !currentWasRemoved {
+			return errors.New("当前代理 API 已发生变化，请重新等待下一次异常")
+		}
+		cfg.ActiveProfiles[category] = candidate.ID
+		return nil
+	})
 }
 
 func (s *DesktopService) SetNetwork(input network.Settings) error {
@@ -1260,6 +2190,55 @@ func (s *DesktopService) SetPreferences(input config.Preferences) error {
 	return nil
 }
 
+// SetTokenSwitchSettings 保存所有来源共用的故障触发、阈值和候选循环策略。
+// 关闭或重新开启某个错误类型会清理其旧统计；阈值、窗口和模式变化则基于仍有效的其他统计重新评估。
+func (s *DesktopService) SetTokenSwitchSettings(input config.TokenSwitchSettings) error {
+	if err := config.ValidateTokenSwitch(input); err != nil {
+		return err
+	}
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	previous := state.Config.TokenSwitch
+	if _, err := s.runtime.UpdateConfig(func(cfg *config.AppConfig) error {
+		cfg.TokenSwitch = input
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.runtime.ClearHealthForTokenSwitchChanges(previous, input)
+	if input.Mode != config.TokenSwitchModeAuto {
+		// 自动轮次只在本次运行的自动模式中有效；切回手动后必须丢弃尝试集合和自动通知。
+		s.switchMu.Lock()
+		s.switchRounds = make(map[string]*tokenSwitchRound)
+		s.autoSwitchNotices = make(map[string]*PublicDogeTokenSwitchPrompt)
+		s.switchMu.Unlock()
+	}
+	// 修改模式或阈值后重新评估已有运行时状态，使自动模式无需等待下一次请求才接管。
+	s.handleHealthChanged()
+	return nil
+}
+
+// SetDogeAlertSettings 保存余额和套餐提醒的独立开关与美元阈值。
+// 关闭提醒不会删除已同步的余额、套餐或公告数据，只是不再生成对应右下角提醒。
+func (s *DesktopService) SetDogeAlertSettings(input config.DogeAlertSettings) error {
+	if math.IsNaN(input.BalanceThresholdUSD) || math.IsInf(input.BalanceThresholdUSD, 0) || input.BalanceThresholdUSD <= 0 {
+		return errors.New("余额提醒阈值必须是大于 0 的数字")
+	}
+	if math.IsNaN(input.SubscriptionThresholdUSD) || math.IsInf(input.SubscriptionThresholdUSD, 0) || input.SubscriptionThresholdUSD <= 0 {
+		return errors.New("套餐提醒阈值必须是大于 0 的数字")
+	}
+	return s.updateConfig(func(cfg *config.AppConfig) error {
+		cfg.Doge.Notifications.BalanceAlertEnabled = input.BalanceEnabled
+		cfg.Doge.Notifications.BalanceAlertThresholdUSD = input.BalanceThresholdUSD
+		cfg.Doge.Notifications.SubscriptionAlertEnabled = input.SubscriptionEnabled
+		cfg.Doge.Notifications.SubscriptionAlertThresholdUSD = input.SubscriptionThresholdUSD
+		reconcileDogeQuotaAlertRecords(&cfg.Doge.Notifications, cfg.Doge.Account, cfg.Doge.Subscriptions, time.Now())
+		return nil
+	})
+}
+
 // OpenDogeTopup 使用系统默认浏览器打开二狗子购买入口。
 // 购买地址来自最近一次 `/api/user/topup/info` 同步结果，不接受前端传入的任意 URL。
 func (s *DesktopService) OpenDogeTopup() error {
@@ -1277,6 +2256,13 @@ func (s *DesktopService) OpenDogeTopup() error {
 // OpenDogeProfile 使用系统默认浏览器打开二狗子用户中心，令牌生成路径由界面说明固定提示。
 func (s *DesktopService) OpenDogeProfile() error {
 	return platform.OpenURL(dogeProfileURL)
+}
+
+// OpenExternalURL 使用系统默认浏览器打开前端传入的外部 HTTP(S) 地址。
+// URL 的协议和主机校验由 platform.OpenURL 统一执行，避免 WebView 在应用内处理外链，
+// 也避免把任意协议交给操作系统。
+func (s *DesktopService) OpenExternalURL(raw string) error {
+	return platform.OpenURL(raw)
 }
 
 func (s *DesktopService) TestProfile(id string) (TestResult, error) {
@@ -1321,7 +2307,7 @@ func publicProfile(profile config.Profile, activeProfiles map[string]string) Pub
 	return PublicProfile{
 		ID: profile.ID, Source: profile.Source, Category: profile.Category, Name: profile.Name, BaseURL: profile.BaseURL,
 		APIKey: profile.APIKey, Note: profile.Note, Headers: profile.Headers, Models: publicModels(profile.Models), DefaultModel: profile.DefaultModel,
-		Active: activeProfiles[profile.Category] == profile.ID, PreviewURL: preview, RemoteTokenID: profile.RemoteTokenID,
+		Active: activeProfiles[profile.Category] == profile.ID, PreviewURL: preview, RemoteTokenID: profile.RemoteTokenID, SkipAutoSwitch: profile.SkipAutoSwitch,
 	}
 }
 
