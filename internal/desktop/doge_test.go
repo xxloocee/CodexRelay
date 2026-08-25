@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/tasknotify"
 )
 
 func TestBindDogeSendsTokenPaginationQuery(t *testing.T) {
@@ -218,6 +219,50 @@ func TestDogeTokenPermittedUsesCurrentGroupDirectory(t *testing.T) {
 	}
 }
 
+func TestDogeDirectoryRecoveryNoticeListsRecoveredTokensAndCandidates(t *testing.T) {
+	previous := &tokenSwitchContext{
+		profile: config.Profile{ID: "profile-41", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "codex-0.02", RemoteTokenID: 41},
+		key:     "doge-active|directory|41",
+		tokens: []config.DogeToken{
+			{ID: 41, Name: "codex-0.02", Status: 0, Group: "low", GroupDisplayName: "GPT低价组", GroupRatio: 0.02},
+			{ID: 42, Name: "codex-0.03", Status: 0, Group: "low", GroupDisplayName: "GPT低价组", GroupRatio: 0.03},
+		},
+		groups: []string{"low"},
+		profilesByID: map[int64]config.Profile{
+			41: {ID: "profile-41", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "codex-0.02", RemoteTokenID: 41},
+			42: {ID: "profile-42", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "codex-0.03", RemoteTokenID: 42},
+		},
+	}
+	cfg := config.Default(0)
+	cfg.ActiveProfiles[config.CategoryCodex] = "profile-41"
+	cfg.Profiles = []config.Profile{
+		{ID: "profile-41", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "codex-0.02", APIKey: "key-41", RemoteTokenID: 41},
+		{ID: "profile-42", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "codex-0.03", APIKey: "key-42", RemoteTokenID: 42},
+	}
+	cfg.FailoverOrder = config.NormalizeFailoverOrder(nil, cfg.Profiles)
+	cfg.Doge.Groups = []string{"low"}
+	cfg.Doge.Tokens = []config.DogeToken{
+		{ID: 41, Name: "codex-0.02", Key: "key-41", Status: 1, Group: "low", GroupDisplayName: "GPT低价组", GroupRatio: 0.02},
+		{ID: 42, Name: "codex-0.03", Key: "key-42", Status: 1, Group: "low", GroupDisplayName: "GPT低价组", GroupRatio: 0.03},
+	}
+	recovered := recoveredDogeTokens(previous, cfg)
+	if len(recovered) != 2 || recovered[0].ID != 41 || recovered[1].ID != 42 {
+		t.Fatalf("recovered tokens = %+v", recovered)
+	}
+	notice := buildDogeDirectoryRecoveryNotice(cfg, previous, recovered, availableFailoverProfiles(cfg, config.CategoryCodex))
+	if notice == nil || notice.FailureKind != "directory_recovered" || notice.Mode != "manual" {
+		t.Fatalf("recovery notice = %+v", notice)
+	}
+	for _, want := range []string{"Codex类别", "codex-0.02 (GPT低价组·0.02)", "codex-0.03 (GPT低价组·0.03)", "已恢复可用"} {
+		if !strings.Contains(notice.Message, want) {
+			t.Fatalf("recovery message %q does not contain %q", notice.Message, want)
+		}
+	}
+	if len(notice.Candidates) != 1 || notice.Candidates[0].ProfileID != "profile-42" {
+		t.Fatalf("recovery candidates = %+v", notice.Candidates)
+	}
+}
+
 func TestParseDogeGroupsKeepsRawKeysForMatchingAndOnlyDisplayNameForUI(t *testing.T) {
 	groups, details := parseDogeGroups(map[string]any{
 		"余额低价组":  map[string]any{"display_name": "GPT低价组", "ratio": float64(0.02)},
@@ -375,6 +420,36 @@ func TestReconcileDogeQuotaAlertRecordsDoesNotCreateDisabledAlerts(t *testing.T)
 	}, now)
 	if len(notifications.BalanceAlertRecords) != 0 || len(notifications.SubscriptionAlertRecords) != 0 {
 		t.Fatalf("disabled alerts should not create records = balance:%+v subscription:%+v", notifications.BalanceAlertRecords, notifications.SubscriptionAlertRecords)
+	}
+}
+
+// 余额类消息只在既有提醒记录首次出现或套餐首次进入 low_balance 时入队，避免每次同步重复推送。
+func TestCollectDogeQuotaNotificationEventsOnlyReportsNewLowBalanceStates(t *testing.T) {
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	previous := config.DogeNotificationState{}
+	current := config.DogeNotificationState{
+		BalanceAlertRecords: []config.DogeBalanceAlertRecord{{AccountID: 7, NotifiedAt: now}},
+		SubscriptionAlertRecords: []config.DogeSubscriptionAlertRecord{
+			{SubscriptionID: 9, State: subscriptionAlertStateLowBalance, NotifiedAt: now},
+			{SubscriptionID: 10, State: subscriptionAlertStateExpiringSoon, NotifiedAt: now},
+		},
+	}
+	events := collectDogeQuotaNotificationEvents(previous, current)
+	if len(events) != 2 || events[0].Type != tasknotify.EventAccountBalanceLow || events[1].Type != tasknotify.EventSubscriptionBalanceLow {
+		t.Fatalf("new low balance events = %+v", events)
+	}
+
+	events = collectDogeQuotaNotificationEvents(current, current)
+	if len(events) != 0 {
+		t.Fatalf("unchanged low balance state must not repeat: %+v", events)
+	}
+
+	reentered := current
+	reentered.SubscriptionAlertRecords[0].State = subscriptionAlertStateLowBalance
+	previous.SubscriptionAlertRecords = []config.DogeSubscriptionAlertRecord{{SubscriptionID: 9, State: subscriptionAlertStateExpiringSoon, NotifiedAt: now.Add(-time.Minute)}}
+	events = collectDogeQuotaNotificationEvents(previous, reentered)
+	if len(events) != 2 || events[1].Type != tasknotify.EventSubscriptionBalanceLow {
+		t.Fatalf("re-entered subscription low balance event = %+v", events)
 	}
 }
 

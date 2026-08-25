@@ -201,3 +201,37 @@ func TestValidateDogeSyncIntervals(t *testing.T) {
 		t.Fatal("invalid Doge interval accepted")
 	}
 }
+
+// 任务通知只访问用户完整填写的 URL，禁止非 HTTP(S) 地址与 URL 内嵌认证材料。
+func TestValidateTaskNotificationURL(t *testing.T) {
+	notification := NormalizeTaskNotification(TaskNotification{
+		Enabled:               true,
+		WebhookURL:            "https://www.pushplus.plus/send?token=placeholder&title={title}&content={content}",
+		IdleGraceSeconds:      5,
+		RequestTimeoutSeconds: 10,
+	})
+	if err := ValidateTaskNotification(notification); err != nil {
+		t.Fatalf("有效推送 URL 被拒绝: %v", err)
+	}
+	notification.WebhookURL = "ftp://notify.example.test/send"
+	if err := ValidateTaskNotification(notification); err == nil {
+		t.Fatal("非 HTTP(S) 通知 URL 被接受")
+	}
+	notification.WebhookURL = "https://token@notify.example.test/send"
+	if err := ValidateTaskNotification(notification); err == nil {
+		t.Fatal("URL 内嵌认证材料被接受")
+	}
+}
+
+// 首次创建通知配置时六类事件默认全选；设置页提交的明确空选择则必须被保留，避免用户
+// 的关闭操作在下次读取时被悄悄改写。
+func TestNormalizeTaskNotificationEventSelection(t *testing.T) {
+	legacy := NormalizeTaskNotification(TaskNotification{})
+	if !legacy.EventsInitialized || legacy.Events != DefaultTaskNotificationEvents() {
+		t.Fatalf("既有任务通知默认事件错误: %+v", legacy.Events)
+	}
+	explicitEmpty := NormalizeTaskNotification(TaskNotification{EventsInitialized: true})
+	if explicitEmpty.Events != (TaskNotificationEvents{}) {
+		t.Fatalf("明确空事件选择被覆盖: %+v", explicitEmpty.Events)
+	}
+}

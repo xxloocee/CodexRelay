@@ -110,6 +110,11 @@ function renderTokenSwitch(prompt) {
     historyRows.appendChild(row);
   }
   const candidates = (prompt?.candidates || []).filter((candidate) => candidate.selectable !== false);
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "请选择";
+  placeholder.selected = true;
+  select.appendChild(placeholder);
   for (const candidate of candidates) {
     const option = document.createElement("option");
     option.value = String(candidate.profileId || "");
@@ -118,11 +123,18 @@ function renderTokenSwitch(prompt) {
     select.appendChild(option);
   }
   select.disabled = auto || stopped || candidates.length === 0;
-  $("confirmTokenSwitch").disabled = candidates.length === 0 || stopped;
+  $("confirmTokenSwitch").disabled = stopped || !String(select.value || "").trim();
   if (!auto && prompt && candidates.length === 0) {
     status.textContent = "当前类别没有可用的其他令牌";
   }
 }
+
+$("tokenSwitchCandidates").addEventListener("change", () => {
+  const prompt = switchPrompt;
+  const auto = prompt?.mode === "auto" || Boolean(prompt?.switchedToName);
+  const stopped = auto && Boolean(prompt?.stopped);
+  $("confirmTokenSwitch").disabled = auto || stopped || !String($("tokenSwitchCandidates").value || "").trim();
+});
 
 function render(state) {
   const notificationStatus = $("notificationStatus");

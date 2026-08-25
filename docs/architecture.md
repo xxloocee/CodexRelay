@@ -14,6 +14,7 @@ CodexRelay/
 |  |- relay/                        # 运行时快照、认证和反向代理
 |  |- network/                      # 出站 Transport 与系统代理只读检测
 |  |- usage/                        # usage 旁路观察、聚合与 usage.json
+|  |- tasknotify/                   # 本机 Codex rollout、SQLite idle gate 与耐久 Webhook 队列
 |  |- storage/                      # 原子 JSON 读写和平台文件替换
 |  `- platform/                     # 开机启动与致命错误平台实现
 |- frontend/                        # 嵌入 Wails 的前端与生成 bindings
@@ -32,7 +33,10 @@ CodexRelay/
 ```text
 cmd -> desktop
 desktop -> config, relay, usage, platform, desktop/clientconfig
+desktop -> tasknotify
 desktop/clientconfig -> config, storage
+tasknotify -> storage
+tasknotify -> SQLite（仅只读查询 Codex 本地状态）
 relay -> config, network, usage
 config -> network, storage
 usage -> storage
@@ -49,6 +53,8 @@ usage -> storage
 5. `network` 根据跟随系统、直接连接或指定代理创建独立 Transport，不修改 Windows 系统代理、DNS、路由或 VPN。
 6. `usage.Observer` 只观察流经客户端的响应字节副本。记录失败或未发现真实 usage 时写入 `unreported`，不改变代理响应。
 
+消息通知不进入上述请求链路。`tasknotify.Manager` 由 desktop 生命周期独立托管：任务完成和中断只在设置开启后扫描本机 Codex rollout JSONL，先写入 `pending/`；随后以 Codex 本地 SQLite 的 root/subagent、active goal、`thread_spawn_edges` 和子代理 rollout 生命周期作为二次 idle gate，确认静默窗口内没有更晚生命周期事件后，才原子提升到 `outbox/`。SQLite 只读查询失败时保留 rollout-only 降级行为。令牌自动切换结果及已有二狗子低余额提醒状态由 desktop 在已确认的本地状态变化后直接写入 `outbox/`。后台 HTTP worker 访问用户配置的完整 HTTP(S) 推送 URL，只替换 `{title}`、`{content}` 两个占位符并进行 URL 编码。字段证据、状态机与不支持范围见 [task-notification.md](task-notification.md)。
+
 ## 持久化契约
 
 `config.Store` 和 `usage.Store` 共用 `storage.WriteJSONAtomic`：在目标目录创建临时文件，完整写入并同步，再用平台实现替换目标。读取或校验失败不会覆盖原文件。默认数据目录是当前用户目录下的 `.CodexRelay`（Windows 默认形如 `C:\Users\<用户>\.CodexRelay`），不再读取程序运行目录的配置文件。用户切换目录时，桌面服务在运行时锁内把两个 JSON 快照写入目标目录，拒绝覆盖目标同名文件，提交后切换两个 Store 并清理旧目录中的这两个文件。
@@ -58,6 +64,8 @@ usage -> storage
 首次启动且任一便携数据文件缺失时，桌面服务使用延迟持久化存储：配置、公告同步和用量记录只保留在内存，不会因启动、定时同步或关闭窗口前的运行产生 `config.json`、`usage.json`。用户点击“暂时跳过”或绑定令牌成功后，当前内存快照才写入两个文件，并恢复后续正常保存；写入失败会保留引导状态，避免下次启动误认为初始化已完成。
 
 `config.json` 当前不包含版本字段；未知字段会被忽略，程序只校验当前实际使用的配置字段，不迁移、不修补旧字段，也不读取 `%APPDATA%` 等历史位置。API 密钥明文存于 `Profile.apiKey`，这是便携产品的明确选择；`usage.json`、日志和错误信息不得包含密钥。
+
+消息通知配置位于 `config.taskNotification`；扫描光标、候选、outbox、收据和失败记录位于相同数据目录的 `task-notifications/`。数据目录切换时，该私有目录先复制，目标已有同名状态会拒绝覆盖；主配置迁移成功后才删除旧副本。队列中的本机 thread/turn 标识、rollout 路径和本地事件身份只用于去重和二次确认；任务正文使用 SQLite `threads.name` 与全局状态中的本地项目名称，名称缺失时使用未记录文案，不把 UUID 作为用户可见内容；其他正文按事件类型发送耗时、分组或余额等允许展示的信息，不发送 rollout 路径、turn 标识、API 密钥或原始请求内容。
 
 代理 API 配置同时记录 `source`（`doge` 或 `custom`）和 `category`（`codex`、`claude`、`gemini`、`grok`、`opencode`、`openclaw`、`hermes`、`image`、`other`）。每个 profile 还可以保存用户从上游获取或手动维护的 `models` 与 `defaultModel`，用于编辑页管理和外部客户端写入；模型目录不参与代理转发格式转换。`activeProfiles` 以类别为键保存启用项，每个类别最多一个。`failoverOrder` 按类别保存跨来源的统一 Profile 顺序，`tokenSwitch` 保存手动/自动模式、各异常触发开关、阈值、统计窗口和列表末尾循环策略；单个 Profile 的 `skipAutoSwitch` 只在自动模式中排除该候选。
 

@@ -51,6 +51,12 @@ CodexRelay 是使用 Go + Wails v3 开发的 Windows 桌面程序，同时运行
 - 普通双击启动始终显示主窗口。
 - Windows 开机启动命令会附带 `--autostart`；只有这种启动方式才会应用“开机启动时隐藏”。
 
+## 消息通知
+
+“设置 > 消息通知”可为任务完成、任务异常中断、令牌请求故障、令牌自动切换、令牌自动切换失败、账户余额不足和套餐余额不足分别启用独立推送。所有已选事件都直接访问用户填写的完整 HTTP(S) 推送 URL；URL 的 token、标题、内容等参数由用户自行填写，可用于 Server 酱、PushPlus 等 URL 通知服务。任务事件经过 `pending -> outbox -> sent/dead` 耐久状态机，其他本地状态变化直接进入 `outbox`；网络失败按退避重试，首次启用只建立 rollout 扫描位置，不补发历史任务。
+
+通知不位于透明代理链路，不修改 Codex 的 `config.toml`、`hooks.json`、`auth.json` 或系统网络设置。Webhook 不发送 prompt、最终回复、路径、turn 标识、令牌标识或认证材料；任务通知正文会读取 SQLite `threads.name` 和全局状态中的本地项目名称，包含任务名、项目名、耗时和时间，名称缺失时不会显示 UUID；余额通知会包含当前金额和提醒阈值，自动切换通知会包含前后分组。令牌请求故障在 401、403 连续达到阈值，或 5xx、网络故障在统计窗口内达到阈值时推送，与自动切换开关独立；任务异常中断当前只认本机 rollout JSONL 中的 `turn_aborted`，401、403、5xx 或网络故障本身不直接算作该事件；任务事件当前仅基于本机 rollout JSONL 的已验证字段判断，不承诺覆盖没有本地生命周期文件的任务。详见 [消息通知说明](docs/task-notification.md)。
+
 ## 网络出口
 
 - `跟随系统`：读取 Windows 当前显式 HTTP/HTTPS 代理，VPN 和 TUN 路由照常生效。

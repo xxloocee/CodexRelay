@@ -257,6 +257,61 @@ type Preferences struct {
 	RestoreViewMode   string   `json:"restoreViewMode"`
 }
 
+// TaskNotificationEvents 描述允许进入本地耐久队列的通知事件。所有事件只访问用户
+// 预先填写的完整 URL，不携带任务、账户或令牌的动态内容。
+type TaskNotificationEvents struct {
+	TaskCompleted          bool `json:"taskCompleted"`
+	TaskAborted            bool `json:"taskAborted"`
+	TokenRequestFailed     bool `json:"tokenRequestFailed"`
+	TokenAutoSwitched      bool `json:"tokenAutoSwitched"`
+	TokenAutoSwitchFailed  bool `json:"tokenAutoSwitchFailed"`
+	AccountBalanceLow      bool `json:"accountBalanceLow"`
+	SubscriptionBalanceLow bool `json:"subscriptionBalanceLow"`
+}
+
+// DefaultTaskNotificationEvents 为首次启用消息通知的六类事件全部开启；用户仍可在设置页
+// 逐项关闭，明确保存后的空选择不会在后续读取时被重新勾选。
+func DefaultTaskNotificationEvents() TaskNotificationEvents {
+	return TaskNotificationEvents{
+		TaskCompleted:          true,
+		TaskAborted:            true,
+		TokenRequestFailed:     true,
+		TokenAutoSwitched:      true,
+		TokenAutoSwitchFailed:  true,
+		AccountBalanceLow:      true,
+		SubscriptionBalanceLow: true,
+	}
+}
+
+// TaskNotification 保存本机事件通知的直接访问 URL、事件范围和投递边界。
+// URL 由用户完整填写，可在需要消息的查询参数位置使用 {title}、{content} 占位符。
+type TaskNotification struct {
+	Enabled               bool                   `json:"enabled"`
+	WebhookURL            string                 `json:"webhookUrl,omitempty"`
+	Events                TaskNotificationEvents `json:"events"`
+	EventsInitialized     bool                   `json:"eventsInitialized"`
+	IdleGraceSeconds      int                    `json:"idleGraceSeconds"`
+	RequestTimeoutSeconds int                    `json:"requestTimeoutSeconds"`
+	MaxAttempts           int                    `json:"maxAttempts"`
+}
+
+const (
+	// DefaultTaskNotificationIdleGraceSeconds 是 rollout 终态后再次确认文件未变化的默认时间。
+	DefaultTaskNotificationIdleGraceSeconds = 5
+	// DefaultTaskNotificationRequestTimeoutSeconds 限制单次 Webhook 请求，避免后台投递永久阻塞。
+	DefaultTaskNotificationRequestTimeoutSeconds = 10
+)
+
+// NormalizeTaskNotification 为缺少事件范围的既有本机 watcher 配置补足原有默认值。
+// EventsInitialized 用于区分首次升级的空值与用户明确保存的“全不推送”。
+func NormalizeTaskNotification(notification TaskNotification) TaskNotification {
+	if !notification.EventsInitialized {
+		notification.Events = DefaultTaskNotificationEvents()
+		notification.EventsInitialized = true
+	}
+	return notification
+}
+
 type AppConfig struct {
 	ProxyPort        int                     `json:"proxyPort"`
 	LocalAccessToken string                  `json:"localAccessToken"`
@@ -266,6 +321,7 @@ type AppConfig struct {
 	ClientConfigs    map[string]ClientConfig `json:"clientConfigs"`
 	Network          network.Settings        `json:"network"`
 	Preferences      Preferences             `json:"preferences"`
+	TaskNotification TaskNotification        `json:"taskNotification"`
 	Doge             DogeConnection          `json:"doge"`
 	TokenSwitch      TokenSwitchSettings     `json:"tokenSwitch"`
 }
@@ -300,6 +356,7 @@ func Default(proxyPort int) AppConfig {
 		ClientConfigs:    map[string]ClientConfig{},
 		Network:          network.Settings{Mode: "system"},
 		Preferences:      Preferences{CloseToTray: true, VisibleCategories: append([]string(nil), Categories...), DefaultSource: "", DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
+		TaskNotification: TaskNotification{Events: DefaultTaskNotificationEvents(), EventsInitialized: true, IdleGraceSeconds: DefaultTaskNotificationIdleGraceSeconds, RequestTimeoutSeconds: DefaultTaskNotificationRequestTimeoutSeconds},
 		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{BalanceAlertEnabled: true, BalanceAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, BalanceAlertRecords: []DogeBalanceAlertRecord{}, SubscriptionAlertRecords: []DogeSubscriptionAlertRecord{}, Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
 		TokenSwitch:      DefaultTokenSwitchSettings(),
 	}

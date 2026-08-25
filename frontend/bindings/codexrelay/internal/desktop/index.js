@@ -25,6 +25,7 @@ export {
     PublicDogeTokenSwitchPrompt,
     PublicModel,
     PublicProfile,
+    TaskNotificationState,
     TestResult,
     UpdateInfo
 } from "./models.js";

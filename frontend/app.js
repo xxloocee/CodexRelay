@@ -34,6 +34,7 @@ import {
   SetClientConfigPath,
   SetClientConfigSkip,
   SetNetwork,
+  SetTaskNotification,
   SetDogeSyncInterval,
   SetTokenSwitchSettings,
   SetDogeAlertSettings,
@@ -41,6 +42,7 @@ import {
   SetPreferences,
   SetProfileAutoSwitch,
   TestProfile,
+  TestTaskNotification,
   FetchProfileModels,
   SyncDoge,
   UnbindDoge,
@@ -75,6 +77,20 @@ const app = {
   clientSetupCategory: "",
   editorModels: [],
   editorDefaultModel: "",
+  preferencesDirty: false,
+  preferencesDraftRevision: 0,
+  tokenSwitchDirty: false,
+  tokenSwitchDraftRevision: 0,
+  dogeAlertDirty: false,
+  dogeAlertDraftRevision: 0,
+  networkModeDirty: false,
+  networkProxyDirty: false,
+  networkPortDirty: false,
+  networkDraftRevision: 0,
+  clientConfigDrafts: {},
+  clientConfigSkipDrafts: {},
+  taskNotificationDirty: false,
+  taskNotificationDraftRevision: 0,
   confirmResolver: null,
   updateCheckStarted: false,
   update: {
@@ -172,6 +188,7 @@ async function loadState() {
     renderProfiles();
     renderPreferences();
     renderNetwork();
+    renderTaskNotification();
     renderConnection();
     renderDataDirectory();
     renderClientConfigs();
@@ -199,6 +216,8 @@ function renderShell() {
   const failoverStatus = $("failoverStatus");
   failoverStatus.textContent = failoverMode;
   failoverStatus.classList.toggle("manual", app.state.tokenSwitch?.mode !== "auto");
+  $("taskNotificationState").textContent = app.state.taskNotification?.enabled ? "已开启" : "已关闭";
+  $("taskNotificationSummary").classList.toggle("is-enabled", Boolean(app.state.taskNotification?.enabled));
   renderPendingDogeImport();
   renderDogeQuota();
 }
@@ -1694,7 +1713,7 @@ function setSettingsTab(tab) {
   document.querySelectorAll("#settingsTabs button").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === tab);
   });
-  for (const name of ["general", "network", "connection", "advanced", "activity", "about"]) {
+  for (const name of ["general", "network", "taskNotification", "connection", "advanced", "activity", "about"]) {
     $(name + "Panel").classList.toggle("hidden", name !== tab);
   }
 }
@@ -1720,11 +1739,16 @@ function renderClientConfigs() {
     control.className = "client-config-control";
     const input = document.createElement("input");
     input.type = "text";
-    input.value = client.configDir || "";
+    input.value = Object.prototype.hasOwnProperty.call(app.clientConfigDrafts, client.category)
+      ? app.clientConfigDrafts[client.category]
+      : (client.configDir || "");
     input.placeholder = client.configDir || "未检测到默认目录";
     input.dataset.clientCategory = client.category;
     input.setAttribute("aria-label", `${client.label} 配置目录`);
     input.readOnly = client.status === "unsupported";
+    input.addEventListener("input", () => {
+      app.clientConfigDrafts[client.category] = input.value;
+    });
     const choose = document.createElement("button");
     choose.type = "button";
     choose.className = "secondary-button compact-button";
@@ -1735,8 +1759,10 @@ function renderClientConfigs() {
         const selected = await SelectDirectory(input.value.trim());
         if (!selected) return;
         input.value = selected;
+        app.clientConfigDrafts[client.category] = selected;
         setButtonLoading(choose, true, "保存中...");
         await SetClientConfigPath(client.category, selected);
+        if (app.clientConfigDrafts[client.category] === selected) delete app.clientConfigDrafts[client.category];
         await loadState();
         toast(`${client.label} 配置目录已保存`);
       } catch (error) {
@@ -1752,9 +1778,12 @@ function renderClientConfigs() {
     save.append(icon("save"), Object.assign(document.createElement("span"), { textContent: "保存" }));
     save.disabled = client.status === "unsupported";
     save.addEventListener("click", async () => {
+      const directory = input.value.trim();
+      app.clientConfigDrafts[client.category] = directory;
       setButtonLoading(save, true, "保存中...");
       try {
-        await SetClientConfigPath(client.category, input.value.trim());
+        await SetClientConfigPath(client.category, directory);
+        if (app.clientConfigDrafts[client.category] === directory) delete app.clientConfigDrafts[client.category];
         await loadState();
         toast(`${client.label} 配置目录已保存`);
       } catch (error) {
@@ -1769,15 +1798,21 @@ function renderClientConfigs() {
     skipLabel.className = "client-config-skip";
     const skip = document.createElement("input");
     skip.type = "checkbox";
-    skip.checked = Boolean(client.skipConfigReplacement);
+    skip.checked = Object.prototype.hasOwnProperty.call(app.clientConfigSkipDrafts, client.category)
+      ? app.clientConfigSkipDrafts[client.category]
+      : Boolean(client.skipConfigReplacement);
     skip.disabled = client.status === "unsupported";
     skip.setAttribute("aria-label", `${client.label} 跳过配置文件替换`);
     skip.addEventListener("change", async () => {
+      const value = skip.checked;
+      app.clientConfigSkipDrafts[client.category] = value;
       try {
-        await SetClientConfigSkip(client.category, skip.checked);
+        await SetClientConfigSkip(client.category, value);
+        if (app.clientConfigSkipDrafts[client.category] === value) delete app.clientConfigSkipDrafts[client.category];
         await loadState();
         toast(`${client.label} 的跳过配置文件替换设置已保存`);
       } catch (error) {
+        delete app.clientConfigSkipDrafts[client.category];
         skip.checked = !skip.checked;
         toast(errorMessage(error), true);
       }
@@ -1794,12 +1829,17 @@ function renderClientConfigs() {
 
 function renderPreferences() {
   const preferences = app.state.preferences || {};
-  $("closeToTray").checked = preferences.closeToTray;
-  $("launchAtStartup").checked = preferences.launchAtStartup;
-  $("startHidden").checked = preferences.startHidden;
-  renderTokenSwitchSettings();
-  renderDogeAlertSettings();
-  const visible = visibleCategorySet();
+  const preserveDraft = app.preferencesDirty;
+  if (!preserveDraft) {
+    $("closeToTray").checked = preferences.closeToTray;
+    $("launchAtStartup").checked = preferences.launchAtStartup;
+    $("startHidden").checked = preferences.startHidden;
+  }
+  if (!app.tokenSwitchDirty) renderTokenSwitchSettings();
+  if (!app.dogeAlertDirty) renderDogeAlertSettings();
+  const visible = preserveDraft
+    ? new Set(Array.from(document.querySelectorAll("#visibleCategories input[data-category]:checked"), (input) => input.dataset.category))
+    : visibleCategorySet();
   // 保存开关后会重新读取状态并重建列表，重建前后保持内容滚动位置，避免浏览器滚动锚点跳动。
   const settingsContent = $("settingsContent");
   const scrollTop = settingsContent?.scrollTop || 0;
@@ -1813,16 +1853,138 @@ function renderPreferences() {
     input.checked = visible.has(category);
     input.dataset.category = category;
     input.setAttribute("aria-label", `显示${categoryLabel(category)}类别`);
-    input.addEventListener("change", savePreferences);
+    input.addEventListener("change", () => {
+      markPreferencesDirty();
+      savePreferences();
+    });
     const title = document.createElement("span");
     title.textContent = categoryLabel(category);
     row.append(input, title);
     visibleRows.appendChild(row);
   }
-  $("defaultSource").value = preferences.defaultSource || "";
-  $("defaultCategory").value = preferences.defaultCategory || "";
-  $("restoreViewMode").value = preferences.restoreViewMode || "current";
+  if (!preserveDraft) {
+    $("defaultSource").value = preferences.defaultSource || "";
+    $("defaultCategory").value = preferences.defaultCategory || "";
+    $("restoreViewMode").value = preferences.restoreViewMode || "current";
+  }
   if (settingsContent) settingsContent.scrollTop = scrollTop;
+}
+
+// 通用设置中的控件会立即保存，但请求返回前仍可能收到后台状态刷新；草稿版本用于避免旧响应覆盖较新的编辑。
+function markPreferencesDirty() {
+  app.preferencesDirty = true;
+  app.preferencesDraftRevision += 1;
+}
+
+// 令牌异常处理与通用偏好独立保存，避免其中一方的异步响应覆盖另一方未保存的输入。
+function markTokenSwitchDirty() {
+  app.tokenSwitchDirty = true;
+  app.tokenSwitchDraftRevision += 1;
+}
+
+// 余额和套餐提醒独立保存，后台刷新只能更新已提交的区块。
+function markDogeAlertDirty() {
+  app.dogeAlertDirty = true;
+  app.dogeAlertDraftRevision += 1;
+}
+
+function renderNetworkDraftState() {
+  const preserveDraft = app.networkModeDirty || app.networkProxyDirty || app.networkPortDirty;
+  if (!preserveDraft) {
+    document.querySelectorAll("#networkModes button").forEach((button) => {
+      button.classList.toggle("active", button.dataset.mode === app.state.network.mode);
+    });
+    $("manualProxyRow").classList.toggle("hidden", app.state.network.mode !== "manual");
+    $("manualProxy").value = app.state.network.proxyUrl || "";
+    $("proxyPort").value = String(app.state.proxyPort || 8765);
+  }
+  return preserveDraft;
+}
+
+const taskNotificationEventInputs = {
+  taskCompleted: "taskNotificationTaskCompleted",
+  taskAborted: "taskNotificationTaskAborted",
+  tokenRequestFailed: "taskNotificationTokenRequestFailed",
+  tokenAutoSwitched: "taskNotificationTokenAutoSwitched",
+  tokenAutoSwitchFailed: "taskNotificationTokenAutoSwitchFailed",
+  accountBalanceLow: "taskNotificationAccountBalanceLow",
+  subscriptionBalanceLow: "taskNotificationSubscriptionBalanceLow",
+};
+
+// 通知设置只保存用户完整填写的 URL 和事件选择；发送时不会补充或改写 URL 参数。
+function renderTaskNotification() {
+  const notification = app.state?.taskNotification || {};
+  if (!app.taskNotificationDirty) {
+    const events = notification.events || {
+      taskCompleted: true,
+      taskAborted: true,
+      tokenRequestFailed: true,
+      tokenAutoSwitched: true,
+      tokenAutoSwitchFailed: true,
+      accountBalanceLow: true,
+      subscriptionBalanceLow: true,
+    };
+    $("taskNotificationEnabled").checked = Boolean(notification.enabled);
+    $("taskNotificationWebhookUrl").value = notification.webhookUrl || "";
+    for (const [key, id] of Object.entries(taskNotificationEventInputs)) $(id).checked = Boolean(events[key]);
+    $("taskNotificationIdleGraceSeconds").value = String(notification.idleGraceSeconds || 5);
+    $("taskNotificationRequestTimeoutSeconds").value = String(notification.requestTimeoutSeconds || 10);
+    $("taskNotificationMaxAttempts").value = String(notification.maxAttempts || 0);
+  }
+  const status = notification.status || {};
+  $("taskNotificationQueueState").textContent = `候选 ${status.pending || 0} · 待投递 ${status.outbox || 0} · 失败 ${status.dead || 0}`;
+  $("taskNotificationError").textContent = status.lastError || "";
+}
+
+// 后台状态刷新只更新队列信息；表单编辑中的值必须保留到用户保存或离开本次操作。
+function markTaskNotificationDirty() {
+  app.taskNotificationDirty = true;
+  app.taskNotificationDraftRevision += 1;
+}
+
+function taskNotificationPayload() {
+  const events = {};
+  for (const [key, id] of Object.entries(taskNotificationEventInputs)) events[key] = $(id).checked;
+  return {
+    enabled: $("taskNotificationEnabled").checked,
+    webhookUrl: $("taskNotificationWebhookUrl").value.trim(),
+    events,
+    idleGraceSeconds: Number($("taskNotificationIdleGraceSeconds").value),
+    requestTimeoutSeconds: Number($("taskNotificationRequestTimeoutSeconds").value),
+    maxAttempts: Number($("taskNotificationMaxAttempts").value),
+  };
+}
+
+async function saveTaskNotification(button = $("saveTaskNotification"), successMessage = "任务完成通知设置已保存") {
+  const draftRevision = app.taskNotificationDraftRevision;
+  setButtonLoading(button, true, "保存中...");
+  try {
+    await SetTaskNotification(taskNotificationPayload());
+    if (draftRevision === app.taskNotificationDraftRevision) app.taskNotificationDirty = false;
+    await loadState();
+    toast(successMessage);
+    return true;
+  } catch (error) {
+    await loadState();
+    toast(errorMessage(error), true);
+    return false;
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function testTaskNotification() {
+  const button = $("testTaskNotification");
+  if (!(await saveTaskNotification(button, "设置已保存，正在测试通知..."))) return;
+  setButtonLoading(button, true, "测试中...");
+  try {
+    await TestTaskNotification();
+    toast("测试通知已发送");
+  } catch (error) {
+    toast(errorMessage(error), true);
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 function renderTokenSwitchSettings() {
@@ -1848,6 +2010,7 @@ function renderDogeAlertSettings() {
 }
 
 async function saveTokenSwitchSettings() {
+  const draftRevision = app.tokenSwitchDraftRevision;
   const mode = document.querySelector("#tokenSwitchMode button.active")?.dataset.mode || "prompt";
   const payload = {
     mode,
@@ -1864,6 +2027,7 @@ async function saveTokenSwitchSettings() {
   };
   try {
     await SetTokenSwitchSettings(payload);
+    if (draftRevision === app.tokenSwitchDraftRevision) app.tokenSwitchDirty = false;
     await loadState();
     toast("令牌异常处理设置已保存");
   } catch (error) {
@@ -1873,6 +2037,7 @@ async function saveTokenSwitchSettings() {
 }
 
 async function saveDogeAlertSettings() {
+  const draftRevision = app.dogeAlertDraftRevision;
   const payload = {
     balanceEnabled: $("balanceAlertEnabled").checked,
     balanceThresholdUsd: Number($("balanceAlertThresholdUSD").value),
@@ -1881,6 +2046,7 @@ async function saveDogeAlertSettings() {
   };
   try {
     await SetDogeAlertSettings(payload);
+    if (draftRevision === app.dogeAlertDraftRevision) app.dogeAlertDirty = false;
     await loadState();
     toast("余额和套餐提醒设置已保存");
   } catch (error) {
@@ -1890,8 +2056,10 @@ async function saveDogeAlertSettings() {
 }
 
 async function savePreferences() {
+  const draftRevision = app.preferencesDraftRevision;
   const visibleCategories = Array.from(document.querySelectorAll("#visibleCategories input[data-category]:checked"), (input) => input.dataset.category);
   if (!visibleCategories.length) {
+    app.preferencesDirty = false;
     renderPreferences();
     toast("至少保留一个主页类别", true);
     return;
@@ -1913,6 +2081,7 @@ async function savePreferences() {
   };
   try {
     await SetPreferences(payload);
+    if (draftRevision === app.preferencesDraftRevision) app.preferencesDirty = false;
     await loadState();
     toast("通用设置已保存");
   } catch (error) {
@@ -1922,18 +2091,15 @@ async function savePreferences() {
 }
 
 function renderNetwork() {
-  document.querySelectorAll("#networkModes button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.mode === app.state.network.mode);
-  });
-  $("manualProxyRow").classList.toggle("hidden", app.state.network.mode !== "manual");
-  if (document.activeElement !== $("manualProxy")) $("manualProxy").value = app.state.network.proxyUrl || "";
-  if (document.activeElement !== $("proxyPort")) $("proxyPort").value = String(app.state.proxyPort || 8765);
+  renderNetworkDraftState();
   const system = app.state.systemProxy;
   $("systemProxyState").textContent = system.enabled ? "已检测到 Windows 系统代理" : "使用 Windows 当前路由";
   $("networkNote").textContent = system.note || "";
 }
 
 async function setNetworkMode(mode) {
+  app.networkModeDirty = true;
+  app.networkDraftRevision += 1;
   const proxyUrl = mode === "manual" ? $("manualProxy").value.trim() : "";
   if (mode === "manual" && !proxyUrl) {
     document.querySelectorAll("#networkModes button").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
@@ -1941,14 +2107,21 @@ async function setNetworkMode(mode) {
     $("manualProxy").focus();
     return;
   }
+  document.querySelectorAll("#networkModes button").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
+  $("manualProxyRow").classList.toggle("hidden", mode !== "manual");
   await saveNetwork(mode, proxyUrl);
 }
 
 async function saveNetwork(mode = "manual", proxyUrl = $("manualProxy").value.trim()) {
+  const draftRevision = app.networkDraftRevision;
   const button = $("saveNetwork");
   setButtonLoading(button, true, "保存中...");
   try {
     await SetNetwork({ mode, proxyUrl });
+    if (draftRevision === app.networkDraftRevision) {
+      app.networkModeDirty = false;
+      app.networkProxyDirty = false;
+    }
     await loadState();
     toast("网络出口设置已保存");
   } catch (error) {
@@ -1967,9 +2140,11 @@ async function saveProxyPort() {
     input.focus();
     return;
   }
+  const draftRevision = app.networkDraftRevision;
   setButtonLoading(button, true, "保存中...");
   try {
     await SetProxyPort(port);
+    if (draftRevision === app.networkDraftRevision) app.networkPortDirty = false;
     await loadState();
     toast("监听端口已更新");
   } catch (error) {
@@ -2269,6 +2444,7 @@ $("copyPreviewUrl").addEventListener("click", () => {
   copyText(app.state?.proxyUrls?.[category] || app.state?.proxyUrl || "-");
 });
 $("copyPreviewToken").addEventListener("click", () => copyText(app.state?.localAccessToken || "-"));
+$("copyApiKey").addEventListener("click", () => copyText($("apiKey").value.trim()));
 $("activateProfile").addEventListener("click", (event) => activateProfile(app.selectedId, event.currentTarget));
 $("testProfile").addEventListener("click", () => testProfile(app.selectedId, $("testProfile")));
 $("deleteProfile").addEventListener("click", (event) => deleteProfile(app.selectedId, event.currentTarget));
@@ -2280,16 +2456,41 @@ document.querySelectorAll("#usageRanges button").forEach((button) => button.addE
 }));
 $("usageProfile").addEventListener("change", () => { app.usageProfile = $("usageProfile").value; renderRequests(); });
 $("clearUsage").addEventListener("click", clearUsage);
-for (const id of ["closeToTray", "launchAtStartup", "startHidden", "defaultSource", "defaultCategory", "restoreViewMode"]) $(id).addEventListener("change", savePreferences);
+for (const id of ["closeToTray", "launchAtStartup", "startHidden", "defaultSource", "defaultCategory", "restoreViewMode"]) $(id).addEventListener("change", () => {
+  markPreferencesDirty();
+  savePreferences();
+});
 document.querySelectorAll("#tokenSwitchMode button").forEach((button) => button.addEventListener("click", async () => {
   document.querySelectorAll("#tokenSwitchMode button").forEach((item) => item.classList.toggle("active", item === button));
+  markTokenSwitchDirty();
   await saveTokenSwitchSettings();
 }));
-for (const id of ["failoverLoop", "trigger401", "trigger403", "trigger5xx", "triggerNetwork", "triggerDirectoryInvalid", "triggerDirectoryMissing", "authFailureThreshold", "upstreamFailureThreshold", "upstreamFailureWindowMinutes"]) $(id).addEventListener("change", saveTokenSwitchSettings);
-for (const id of ["balanceAlertEnabled", "balanceAlertThresholdUSD", "subscriptionAlertEnabled", "subscriptionAlertThresholdUSD"]) $(id).addEventListener("change", saveDogeAlertSettings);
+for (const id of ["failoverLoop", "trigger401", "trigger403", "trigger5xx", "triggerNetwork", "triggerDirectoryInvalid", "triggerDirectoryMissing", "authFailureThreshold", "upstreamFailureThreshold", "upstreamFailureWindowMinutes"]) $(id).addEventListener("change", () => {
+  markTokenSwitchDirty();
+  saveTokenSwitchSettings();
+});
+for (const id of ["authFailureThreshold", "upstreamFailureThreshold", "upstreamFailureWindowMinutes"]) $(id).addEventListener("input", markTokenSwitchDirty);
+for (const id of ["balanceAlertThresholdUSD", "subscriptionAlertThresholdUSD"]) $(id).addEventListener("input", markDogeAlertDirty);
+for (const id of ["balanceAlertEnabled", "balanceAlertThresholdUSD", "subscriptionAlertEnabled", "subscriptionAlertThresholdUSD"]) $(id).addEventListener("change", () => {
+  markDogeAlertDirty();
+  saveDogeAlertSettings();
+});
 document.querySelectorAll("#networkModes button").forEach((button) => button.addEventListener("click", () => setNetworkMode(button.dataset.mode)));
+$("manualProxy").addEventListener("input", () => {
+  app.networkProxyDirty = true;
+  app.networkDraftRevision += 1;
+});
+$("proxyPort").addEventListener("input", () => {
+  app.networkPortDirty = true;
+  app.networkDraftRevision += 1;
+});
 $("saveNetwork").addEventListener("click", () => saveNetwork());
 $("saveProxyPort").addEventListener("click", saveProxyPort);
+$("saveTaskNotification").addEventListener("click", () => saveTaskNotification());
+$("testTaskNotification").addEventListener("click", testTaskNotification);
+for (const id of ["taskNotificationEnabled", "taskNotificationWebhookUrl", "taskNotificationIdleGraceSeconds", "taskNotificationRequestTimeoutSeconds", "taskNotificationMaxAttempts", ...Object.values(taskNotificationEventInputs)]) $(id).addEventListener("input", markTaskNotificationDirty);
+$("taskNotificationEnabled").addEventListener("change", markTaskNotificationDirty);
+for (const id of Object.values(taskNotificationEventInputs)) $(id).addEventListener("change", markTaskNotificationDirty);
 $("dogeConnectionAction").addEventListener("click", async () => {
   const doge = app.state?.doge || {};
   const button = $("dogeConnectionAction");

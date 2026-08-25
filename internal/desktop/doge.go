@@ -28,6 +28,7 @@ import (
 	"codexrelay/internal/config"
 	"codexrelay/internal/network"
 	"codexrelay/internal/relay"
+	"codexrelay/internal/tasknotify"
 )
 
 const defaultDogeBaseURL = "https://api.ergouzi.life"
@@ -670,6 +671,7 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 	data.TokenOrder = mergeDogeTokenOrder(previousOrder, data.Tokens)
 	data.Tokens = orderDogeTokens(data.TokenOrder, data.Tokens)
 	removedProfileIDs := make([]string, 0)
+	pendingNotificationEvents := make([]taskNotificationEvent, 0, 2)
 	err := s.updateConfig(func(cfg *config.AppConfig) error {
 		// 同步响应只覆盖远端目录字段；同步间隔由本地设置维护，必须从当前配置继承，避免后台同步把用户选择重置为默认值。
 		data.SyncIntervalMinutes = cfg.Doge.SyncIntervalMinutes
@@ -677,6 +679,7 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 		now := time.Now()
 		data.Subscriptions = filterDogeSubscriptionsForStorage(data.Subscriptions, now)
 		reconcileDogeQuotaAlertRecords(&data.Notifications, data.Account, data.Subscriptions, now)
+		pendingNotificationEvents = collectDogeQuotaNotificationEvents(cfg.Doge.Notifications, data.Notifications)
 		data.Notifications.DismissedAlertKeys = pruneDogeAlertKeys(data.Notifications.DismissedAlertKeys, data.Subscriptions, now)
 		for i := range data.Tokens {
 			if data.Tokens[i].Category != "" {
@@ -719,6 +722,9 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 	}
 	for _, profileID := range removedProfileIDs {
 		s.runtime.ResetProfileHealth(profileID)
+	}
+	for _, event := range pendingNotificationEvents {
+		s.enqueueTaskNotificationEvent(event.Type, event.Identity, event.Details)
 	}
 	return nil
 }
@@ -974,6 +980,30 @@ func reconcileDogeQuotaAlertRecords(notifications *config.DogeNotificationState,
 		subscriptionRecords = append(subscriptionRecords, record)
 	}
 	notifications.SubscriptionAlertRecords = subscriptionRecords
+}
+
+// collectDogeQuotaNotificationEvents 只识别本次同步中新进入的低余额状态。已有提醒
+// 继续同步、仅金额变化、套餐临近到期或已过期都不会重复排队，避免按同步周期刷屏。
+func collectDogeQuotaNotificationEvents(previous, current config.DogeNotificationState) []taskNotificationEvent {
+	events := make([]taskNotificationEvent, 0, 2)
+	for _, record := range current.BalanceAlertRecords {
+		if record.AccountID <= 0 || findDogeBalanceAlertRecord(previous.BalanceAlertRecords, record.AccountID) >= 0 {
+			continue
+		}
+		events = append(events, taskNotificationEvent{Type: tasknotify.EventAccountBalanceLow, Identity: fmt.Sprintf("%d\x00%s", record.AccountID, record.NotifiedAt.UTC().Format(time.RFC3339Nano)), Details: tasknotify.EventDetails{OccurredAt: record.NotifiedAt, AmountUSD: record.AmountUSD, ThresholdUSD: record.ThresholdUSD}})
+	}
+	for _, record := range current.SubscriptionAlertRecords {
+		previousIndex := findDogeSubscriptionAlertRecord(previous.SubscriptionAlertRecords, record.SubscriptionID)
+		previousState := ""
+		if previousIndex >= 0 {
+			previousState = previous.SubscriptionAlertRecords[previousIndex].State
+		}
+		if record.SubscriptionID <= 0 || record.State != subscriptionAlertStateLowBalance || previousState == subscriptionAlertStateLowBalance {
+			continue
+		}
+		events = append(events, taskNotificationEvent{Type: tasknotify.EventSubscriptionBalanceLow, Identity: fmt.Sprintf("%d\x00%s", record.SubscriptionID, record.NotifiedAt.UTC().Format(time.RFC3339Nano)), Details: tasknotify.EventDetails{OccurredAt: record.NotifiedAt, AmountUSD: record.AmountUSD, ThresholdUSD: record.ThresholdUSD}})
+	}
+	return events
 }
 
 func alertThresholdChanged(previous, current float64) bool {

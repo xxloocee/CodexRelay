@@ -26,6 +26,9 @@ func Validate(cfg AppConfig) error {
 	if err := ValidateTokenSwitch(cfg.TokenSwitch); err != nil {
 		return err
 	}
+	if err := ValidateTaskNotification(cfg.TaskNotification); err != nil {
+		return err
+	}
 	if !strings.HasPrefix(cfg.LocalAccessToken, "sk-") {
 		return errors.New("本地访问令牌必须以 sk- 开头")
 	}
@@ -96,6 +99,37 @@ func ValidateTokenSwitch(settings TokenSwitchSettings) error {
 	}
 	if settings.UpstreamFailureWindowMinutes < 1 {
 		return errors.New("5XX/连接异常统计窗口必须大于 0 分钟")
+	}
+	return nil
+}
+
+// ValidateTaskNotification 校验本机 watcher 的直接访问 URL。地址由用户完整提供，
+// 当前实现只允许 HTTP(S)，且不允许把认证材料嵌入 URL userinfo。
+func ValidateTaskNotification(notification TaskNotification) error {
+	notification = NormalizeTaskNotification(notification)
+	if notification.IdleGraceSeconds < 1 || notification.IdleGraceSeconds > 60 {
+		return errors.New("任务通知静默时间必须是 1 到 60 秒之间的整数")
+	}
+	if notification.RequestTimeoutSeconds < 1 || notification.RequestTimeoutSeconds > 60 {
+		return errors.New("任务通知请求超时必须是 1 到 60 秒之间的整数")
+	}
+	if notification.MaxAttempts < 0 || notification.MaxAttempts > 1000 {
+		return errors.New("任务通知最大重试次数必须是 0 到 1000 之间的整数")
+	}
+	endpoint := strings.TrimSpace(notification.WebhookURL)
+	if !notification.Enabled && endpoint == "" {
+		return nil
+	}
+	parseEndpoint := strings.NewReplacer("{title}", "title-placeholder", "{content}", "content-placeholder").Replace(endpoint)
+	u, err := url.Parse(parseEndpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return errors.New("任务通知 Webhook 地址必须是有效的 http:// 或 https:// 地址")
+	}
+	if endpoint != notification.WebhookURL {
+		return errors.New("任务通知 Webhook 地址不能包含首尾空白字符")
+	}
+	if notification.Enabled && endpoint == "" {
+		return errors.New("开启任务通知前请填写 Webhook 地址")
 	}
 	return nil
 }

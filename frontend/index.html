@@ -67,7 +67,10 @@
             <div class="filter-row"><span class="filter-label">来源</span><div class="filter-options" data-filter-group="source" role="tablist" aria-label="来源筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="doge">二狗子</button><button class="filter-option" type="button" data-filter-value="custom">自定义</button></div></div>
             <div class="filter-row"><span class="filter-label">类别</span><div class="filter-options" data-filter-group="category" role="tablist" aria-label="类别筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="codex">Codex</button><button class="filter-option" type="button" data-filter-value="claude">Claude</button><button class="filter-option" type="button" data-filter-value="gemini">Gemini</button><button class="filter-option" type="button" data-filter-value="grok">Grok</button><button class="filter-option" type="button" data-filter-value="opencode">OpenCode</button><button class="filter-option" type="button" data-filter-value="openclaw">OpenClaw</button><button class="filter-option" type="button" data-filter-value="hermes">Hermes</button><button class="filter-option" type="button" data-filter-value="image">生图</button><button class="filter-option" type="button" data-filter-value="other">其他</button></div></div>
           </div>
-          <div class="active-summary" aria-label="当前启用状态"><div class="active-count-line"><span>已启用</span><strong id="activeCount">0/9</strong></div><span id="failoverStatus" class="failover-status">模式：手动提示</span></div>
+          <div class="homepage-statuses">
+            <div class="active-summary" aria-label="当前启用状态"><div class="active-count-line"><span>已启用</span><strong id="activeCount">0/9</strong></div><span id="failoverStatus" class="failover-status">模式：手动提示</span></div>
+            <div id="taskNotificationSummary" class="task-notification-summary" aria-label="消息通知状态"><span>消息通知</span><strong id="taskNotificationState">已关闭</strong></div>
+          </div>
         </div>
         <div id="profileList" class="profile-list"></div>
         <div id="emptyProfiles" class="empty-state hidden">
@@ -95,7 +98,7 @@
           <label class="field"><span>API 地址</span><input id="baseUrl" type="url" autocomplete="off" placeholder="https://api.example.com/v1" required></label>
           <label class="field">
             <span>API 密钥</span>
-            <input id="apiKey" type="password" autocomplete="new-password" placeholder="sk-..." required aria-readonly="false">
+            <span class="api-key-control"><input id="apiKey" type="password" autocomplete="new-password" placeholder="sk-..." required aria-readonly="false"><button id="copyApiKey" class="secondary-button api-key-copy" type="button" title="复制 API 密钥" aria-label="复制 API 密钥"><span class="icon icon-copy" aria-hidden="true"></span><span>复制</span></button></span>
           </label>
           <div class="preview-row">
             <div>
@@ -141,7 +144,7 @@
       <div class="settings-shell">
         <nav id="settingsTabs" class="settings-tabs" aria-label="设置分类">
           <div class="settings-nav-head"><strong>设置</strong><span>CodexRelay</span></div>
-          <button class="active" type="button" data-tab="general">通用</button><button type="button" data-tab="network">网络</button><button type="button" data-tab="connection">连接</button><button type="button" data-tab="advanced">高级</button><button type="button" data-tab="activity">用量统计</button><button type="button" data-tab="about">关于</button>
+          <button class="active" type="button" data-tab="general">通用</button><button type="button" data-tab="network">网络</button><button type="button" data-tab="taskNotification">消息通知</button><button type="button" data-tab="connection">连接</button><button type="button" data-tab="advanced">高级</button><button type="button" data-tab="activity">用量统计</button><button type="button" data-tab="about">关于</button>
         </nav>
         <main id="settingsContent" class="settings-content">
         <div id="generalPanel" class="settings-panel">
@@ -212,6 +215,35 @@
             <div><strong>监听端口</strong><span>代理监听端口，默认 8765，保存后立即生效</span></div>
             <div class="network-port-control"><input id="proxyPort" type="number" min="1" max="65535" step="1" inputmode="numeric" aria-label="监听端口"><button id="saveProxyPort" class="primary-button" type="button"><span data-button-label>保存</span></button></div>
           </div>
+        </div>
+        <div id="taskNotificationPanel" class="settings-panel hidden">
+          <div class="panel-heading"><div><span class="panel-kicker">Codex事件推送服务</span><h2>消息通知</h2><p class="panel-description">当满足已勾选的事件要求时，自动调用推送 URL，避免开发进度中断，长时间无人处理。</p></div></div>
+          <div class="setting-list">
+            <label class="setting-row"><span><strong>启用消息通知</strong><small>首次启用只建立本地任务扫描位置，不补发历史任务</small></span><input id="taskNotificationEnabled" class="switch-input" type="checkbox"></label>
+          </div>
+          <div class="task-notification-fields">
+            <label class="field"><span>推送 URL</span><input id="taskNotificationWebhookUrl" type="url" autocomplete="off" placeholder="https://www.pushplus.plus/send?token=xxx&amp;title={title}&amp;content={content}"><small>可使用 {title} 和 {content}，发送时会自动替换并编码。</small></label>
+            <p class="task-notification-service-links"><a href="https://sct.ftqq.com/">申请 Server 酱</a><a href="https://www.pushplus.plus/">申请推送加</a></p>
+            <section class="task-notification-setting-card" aria-label="消息通知事件与投递规则">
+              <div class="task-notification-card-header"><span><strong>推送事件</strong><small>仅勾选的本地状态变化会进入后台投递队列</small></span></div>
+              <div class="compact-option-grid task-notification-event-grid">
+                <label class="compact-check-option"><input id="taskNotificationTaskCompleted" type="checkbox"><span>任务完成</span></label>
+                <label class="compact-check-option"><input id="taskNotificationTaskAborted" type="checkbox"><span>任务异常中断</span></label>
+                <label class="compact-check-option"><input id="taskNotificationTokenRequestFailed" type="checkbox"><span>令牌请求故障</span></label>
+                <label class="compact-check-option"><input id="taskNotificationTokenAutoSwitched" type="checkbox"><span>令牌自动切换</span></label>
+                <label class="compact-check-option"><input id="taskNotificationTokenAutoSwitchFailed" type="checkbox"><span>令牌自动切换失败</span></label>
+                <label class="compact-check-option"><input id="taskNotificationAccountBalanceLow" type="checkbox"><span>账户余额不足</span></label>
+                <label class="compact-check-option"><input id="taskNotificationSubscriptionBalanceLow" type="checkbox"><span>套餐余额不足</span></label>
+              </div>
+              <div class="task-notification-number-fields">
+                <label class="field"><span>静默确认（秒）</span><input id="taskNotificationIdleGraceSeconds" type="number" min="1" max="60" step="1" inputmode="numeric"><small>任务完成或中断后，rollout 保持不变多久才入队；仅作用于任务事件。</small></label>
+                <label class="field"><span>请求超时（秒）</span><input id="taskNotificationRequestTimeoutSeconds" type="number" min="1" max="60" step="1" inputmode="numeric"><small>每次访问推送 URL 最长等待时间；超时后按重试规则处理。</small></label>
+                <label class="field"><span>最大尝试次数</span><input id="taskNotificationMaxAttempts" type="number" min="0" max="1000" step="1" inputmode="numeric"><small>单个失败事件最多访问次数；0 表示持续按退避策略重试。</small></label>
+              </div>
+            </section>
+          </div>
+          <div class="task-notification-runtime"><span id="taskNotificationQueueState">候选 0 · 待投递 0 · 失败 0</span><span id="taskNotificationError" class="task-notification-error"></span></div>
+          <div class="task-notification-actions"><button id="testTaskNotification" class="secondary-button" type="button"><span class="icon icon-activity" aria-hidden="true"></span><span data-button-label>发送测试通知</span></button><button id="saveTaskNotification" class="primary-button" type="button"><span class="icon icon-save" aria-hidden="true"></span><span data-button-label>保存</span></button></div>
         </div>
         <div id="connectionPanel" class="settings-panel hidden">
           <div class="doge-connection-shell">

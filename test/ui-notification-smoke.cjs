@@ -36,6 +36,7 @@ const state = {
   uptimeSeconds: 1,
   tokenSwitch: { mode: "prompt", loop: true, trigger401: true, trigger403: true, trigger5xx: true, triggerNetwork: true, triggerDirectoryInvalid: true, triggerDirectoryMissing: true, authFailureThreshold: 5, upstreamFailureThreshold: 5, upstreamFailureWindowMinutes: 3 },
   preferences: { closeToTray: true, launchAtStartup: false, startHidden: false, defaultSource: "", defaultCategory: "codex", restoreViewMode: "current" },
+  taskNotification: { enabled: true, webhookUrl: "https://notify.example.test/webhook", events: { taskCompleted: true, taskAborted: true, tokenRequestFailed: true, tokenAutoSwitched: true, tokenAutoSwitchFailed: true, accountBalanceLow: true, subscriptionBalanceLow: true }, idleGraceSeconds: 5, requestTimeoutSeconds: 10, maxAttempts: 0, status: { enabled: true, pending: 1, outbox: 2, dead: 0, lastError: "" } },
   doge: {
     bound: false,
     walletUsd: 0,
@@ -74,7 +75,7 @@ const server = http.createServer((request, response) => {
   let requestPath = decodeURIComponent((request.url || "/").split("?")[0]);
   if (requestPath === "/wails/runtime.js") {
     response.writeHead(200, { "Content-Type": "text/javascript" });
-  response.end(`export const CancellablePromise = Promise; export const Create = { Any: x => x, Array: f => xs => (xs || []).map(f), Map: (keyFn, valueFn) => x => Object.fromEntries(Object.entries(x || {}).map(([key, value]) => [keyFn(key), valueFn(value)])), Nullable: f => x => x == null ? null : f(x), }; export const Events = { On: (name, callback) => { globalThis.__wailsEvents = globalThis.__wailsEvents || {}; globalThis.__wailsEvents[name] = callback; }, }; const wait = ms => new Promise(resolve => setTimeout(resolve, ms)); export const Call = { ByID: async (id, ...args) => { if (id === 3062805628) return globalThis.__relayState; if (id === 2130459618) return { ok: false, status: 503, durationMs: 12 }; if (id === 2419338323) { if (globalThis.__openExternalURLShouldFail) throw new Error("默认浏览器打开失败"); globalThis.__openedExternalURL = args[0]; return; } if (id === 1536866851 || id === 2451788025 || id === 1654359792) { await wait(450); return; } if (id === 215903019) { globalThis.__relayState.doge.notifications.unreadCount = 0; return; } if (id === 93543395) { globalThis.__relayState.doge.tokenSwitch = null; if (globalThis.__relayState.doge.tokenSwitches) for (const [category, prompt] of Object.entries(globalThis.__relayState.doge.tokenSwitches)) if (prompt?.key === args[0]) delete globalThis.__relayState.doge.tokenSwitches[category]; return; } if (id === 3647092161) { globalThis.__relayState.doge.tokenSwitch = null; return; } if (id === 3707202435) { globalThis.__relayState.needsOnboarding = false; return; } if (id === 1746439210) { globalThis.__relayState.proxyPort = args[0]; return; } if (id === 3841417432) { globalThis.__relayState.doge.syncIntervalMinutes = args[0]; return; } if (id === 3757833444) { const [category, ids] = args; globalThis.__lastFailoverOrderArgs = { category, ids: [...ids] }; globalThis.__relayState.failoverOrder[category] = [...ids]; return; } if (id === 1862834343) { const profile = globalThis.__relayState.profiles.find(item => item.id === args[0]); if (profile) profile.skipAutoSwitch = !args[1]; return; } if (id === 1477342492) return (args[0] || "C:\\\\Users\\\\Ricky-Desktop\\\\.CodexRelay") + "\\\\picked"; if (id === 2510123141) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.configDir = args[1]; return; } if (id === 2542801733) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.skipConfigReplacement = args[1]; return; } if (id === 3032635246) { globalThis.__relayState.dataDirectory = args[0]; return; } return; } };`);
+  response.end(`export const CancellablePromise = Promise; export const Create = { Any: x => x, Array: f => xs => (xs || []).map(f), Map: (keyFn, valueFn) => x => Object.fromEntries(Object.entries(x || {}).map(([key, value]) => [keyFn(key), valueFn(value)])), Nullable: f => x => x == null ? null : f(x), }; export const Events = { On: (name, callback) => { globalThis.__wailsEvents = globalThis.__wailsEvents || {}; globalThis.__wailsEvents[name] = callback; }, }; const wait = ms => new Promise(resolve => setTimeout(resolve, ms)); export const Call = { ByID: async (id, ...args) => { if (id === 3062805628) return globalThis.__relayState; if (id === 2130459618) return { ok: false, status: 503, durationMs: 12 }; if (id === 2419338323) { if (globalThis.__openExternalURLShouldFail) throw new Error("默认浏览器打开失败"); globalThis.__openedExternalURL = args[0]; return; } if (id === 1536866851 || id === 2451788025 || id === 1654359792) { await wait(450); return; } if (id === 215903019) { globalThis.__relayState.doge.notifications.unreadCount = 0; return; } if (id === 93543395) { globalThis.__relayState.doge.tokenSwitch = null; if (globalThis.__relayState.doge.tokenSwitches) for (const [category, prompt] of Object.entries(globalThis.__relayState.doge.tokenSwitches)) if (prompt?.key === args[0]) delete globalThis.__relayState.doge.tokenSwitches[category]; return; } if (id === 3647092161) { globalThis.__relayState.doge.tokenSwitch = null; return; } if (id === 3707202435) { globalThis.__relayState.needsOnboarding = false; return; } if (id === 1746439210) { globalThis.__relayState.proxyPort = args[0]; return; } if (id === 3841417432) { globalThis.__relayState.doge.syncIntervalMinutes = args[0]; return; } if (id === 3757833444) { const [category, ids] = args; globalThis.__lastFailoverOrderArgs = { category, ids: [...ids] }; globalThis.__relayState.failoverOrder[category] = [...ids]; return; } if (id === 1862834343) { const profile = globalThis.__relayState.profiles.find(item => item.id === args[0]); if (profile) profile.skipAutoSwitch = !args[1]; return; } if (id === 1477342492) return (args[0] || "C:\\\\Users\\\\Ricky-Desktop\\\\.CodexRelay") + "\\\\picked"; if (id === 2510123141) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.configDir = args[1]; return; } if (id === 2542801733) { const client = globalThis.__relayState.clientConfigs.find(item => item.category === args[0]); if (client) client.skipConfigReplacement = args[1]; return; } if (id === 3032635246) { globalThis.__relayState.dataDirectory = args[0]; return; } if (id === 3515011149) { Object.assign(globalThis.__relayState.taskNotification, args[0]); return; } if (id === 2021288413) { Object.assign(globalThis.__relayState.tokenSwitch, args[0]); return; } if (id === 2204274041) { const input = args[0]; Object.assign(globalThis.__relayState.doge, { balanceAlertEnabled: input.balanceEnabled, balanceAlertThresholdUsd: input.balanceThresholdUsd, subscriptionAlertEnabled: input.subscriptionEnabled, subscriptionAlertThresholdUsd: input.subscriptionThresholdUsd }); return; } if (id === 1947134911) return; return; } };`);
     return;
   }
   const filePath = requestPath === "/logo.png" ? path.join(projectRoot, "logo.png") : path.join(frontendRoot, requestPath === "/" ? "index.html" : requestPath.slice(1));
@@ -111,6 +112,11 @@ const server = http.createServer((request, response) => {
     if (activeSummary.text !== "模式：手动提示" || activeSummary.modeTop <= activeSummary.countTop) throw new Error(`主页启用状态未分为两行: ${JSON.stringify(activeSummary)}`);
     await page.click("#addProfile");
     if (await page.locator("#apiKey").getAttribute("type") !== "password") throw new Error("编辑页 API 密钥仍以明文输入框显示");
+    await page.fill("#apiKey", "sk-editor-placeholder");
+    if (await page.locator("#copyApiKey").textContent() !== "复制") throw new Error("编辑页 API 密钥复制按钮未显示");
+    await page.click("#copyApiKey");
+    if (await page.evaluate(() => globalThis.__copiedText) !== "sk-editor-placeholder") throw new Error("编辑页 API 密钥复制内容错误");
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "editor-api-key-copy-ui-smoke.png") });
     if ((await page.locator("#previewToken").textContent()).includes(state.localAccessToken)) throw new Error("编辑页预览仍显示完整本地密钥");
     if (await page.locator("#copyPreviewUrl").textContent() !== "复制地址" || await page.locator("#copyPreviewToken").textContent() !== "复制密钥") throw new Error("编辑页复制操作未拆分为地址和密钥");
     await page.click("#copyPreviewUrl");
@@ -171,7 +177,7 @@ const server = http.createServer((request, response) => {
       row.classList.remove("dragging");
       return result;
     });
-    if (draggingBorder.outline === "none" || !draggingBorder.shadow.includes("inset")) throw new Error(`拖动状态左边框样式未生效: ${JSON.stringify(draggingBorder)}`);
+    if (draggingBorder.outline === "none" || !/3px 0px 0px 0px inset/.test(draggingBorder.shadow)) throw new Error(`拖动状态左边框样式未生效: ${JSON.stringify(draggingBorder)}`);
     const customHandle = sortPage.locator('[data-profile-id="custom-first"] .drag-handle');
     const dogeRow = sortPage.locator('[data-profile-id="doge-middle"]');
     const dogeBounds = await dogeRow.boundingBox();
@@ -291,14 +297,74 @@ const server = http.createServer((request, response) => {
     if (await page.locator("#announcementTimelinePane h2").count() !== 1) throw new Error("历史公告 Markdown 标题未渲染");
     await page.click("#closeAnnouncements");
     await page.click("#openSettings");
+    const desktopSettingsTabs = ["general", "network", "taskNotification", "connection", "advanced", "activity", "about"];
+    const desktopSettingsBaseline = await page.evaluate(() => {
+      const view = document.querySelector("#settingsView");
+      const shell = view.querySelector(".settings-shell");
+      const tabs = view.querySelector("#settingsTabs");
+      const content = view.querySelector("#settingsContent");
+      const rect = (node) => {
+        const value = node.getBoundingClientRect();
+        return { x: value.x, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+      };
+      return { view: rect(view), shell: rect(shell), tabs: rect(tabs), content: rect(content), documentWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth };
+    });
+    for (const tab of desktopSettingsTabs) {
+      await page.click(`#settingsTabs button[data-tab="${tab}"]`);
+      const layout = await page.evaluate(() => {
+        const view = document.querySelector("#settingsView");
+        const shell = view.querySelector(".settings-shell");
+        const tabs = view.querySelector("#settingsTabs");
+        const content = view.querySelector("#settingsContent");
+        const panel = view.querySelector(".settings-panel:not(.hidden)");
+        const rect = (node) => {
+          const value = node.getBoundingClientRect();
+          return { x: value.x, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height };
+        };
+        return { shell: rect(shell), tabs: rect(tabs), content: rect(content), panel: rect(panel), documentWidth: document.documentElement.scrollWidth, viewportWidth: document.documentElement.clientWidth };
+      });
+      const sameTabs = Math.abs(layout.tabs.x - desktopSettingsBaseline.tabs.x) < 1 && Math.abs(layout.tabs.width - desktopSettingsBaseline.tabs.width) < 1 && Math.abs(layout.tabs.height - desktopSettingsBaseline.tabs.height) < 1;
+      const contentToRight = layout.content.x >= layout.tabs.right - 1 && layout.panel.x >= layout.content.x - 1 && layout.panel.right <= layout.content.right + 1;
+      const noHorizontalOverflow = layout.documentWidth <= layout.viewportWidth;
+      if (!sameTabs || !contentToRight || !noHorizontalOverflow || layout.shell.width <= 0 || layout.tabs.height <= 0 || layout.content.width <= 0) throw new Error(`桌面设置分类布局异常: ${tab} ${JSON.stringify({ baseline: desktopSettingsBaseline, layout })}`);
+    }
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "settings-tabs-layout-ui-smoke.png") });
     if (await page.locator("#defaultSource").inputValue() !== "" || await page.locator("#defaultCategory").inputValue() !== "codex") throw new Error("默认来源或类别未显示为全部/Codex");
+    if (await page.locator("#taskNotificationState").textContent() !== "已开启") throw new Error("主页未显示任务完成通知已开启状态");
+    await page.click('#settingsTabs button[data-tab="taskNotification"]');
+    if (!(await page.locator("#taskNotificationEnabled").isChecked()) || await page.locator("#taskNotificationWebhookUrl").inputValue() !== "https://notify.example.test/webhook") throw new Error("任务通知设置未显示");
+    if (!(await page.locator("#taskNotificationPanel").textContent()).includes("Codex事件推送服务") || !(await page.locator("#taskNotificationPanel").textContent()).includes("当满足已勾选的事件要求时，自动调用推送 URL，避免开发进度中断，长时间无人处理。")) throw new Error("任务通知说明文案错误");
+    if (await page.locator("#taskNotificationRequestMethod").count() || await page.locator("#taskNotificationTitle").count() || await page.locator("#taskNotificationContent").count()) throw new Error("任务通知仍保留多余的消息格式设置");
+    if (!(await page.locator("#taskNotificationTaskCompleted").isChecked()) || !(await page.locator("#taskNotificationTaskAborted").isChecked()) || !(await page.locator("#taskNotificationTokenRequestFailed").isChecked()) || !(await page.locator("#taskNotificationTokenAutoSwitched").isChecked()) || !(await page.locator("#taskNotificationTokenAutoSwitchFailed").isChecked()) || !(await page.locator("#taskNotificationAccountBalanceLow").isChecked()) || !(await page.locator("#taskNotificationSubscriptionBalanceLow").isChecked()) || !(await page.locator(".task-notification-setting-card").count())) throw new Error("消息通知默认事件未全选");
+    await page.locator("#taskNotificationTokenAutoSwitchFailed").click();
+    const checkboxFocusStyle = await page.locator("#taskNotificationTokenAutoSwitchFailed").evaluate((node) => ({ outline: getComputedStyle(node).outlineStyle, shadow: getComputedStyle(node).boxShadow }));
+    if (checkboxFocusStyle.outline !== "none" || checkboxFocusStyle.shadow !== "none") throw new Error(`复选框点击后仍显示焦点框: ${JSON.stringify(checkboxFocusStyle)}`);
+    await page.locator("#taskNotificationTokenAutoSwitchFailed").check();
+    if (await page.locator('.task-notification-service-links a[href="https://sct.ftqq.com/"]').count() !== 1 || await page.locator('.task-notification-service-links a[href="https://www.pushplus.plus/"]').count() !== 1) throw new Error("任务通知服务申请入口错误");
+    if (!(await page.locator("#taskNotificationQueueState").textContent()).includes("候选 1 · 待投递 2 · 失败 0")) throw new Error("任务通知队列状态未显示");
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "task-notification-settings-ui-smoke.png") });
+    await page.locator("#taskNotificationEnabled").uncheck();
+    await page.locator("#taskNotificationTokenAutoSwitchFailed").check();
+    await page.fill("#taskNotificationWebhookUrl", "https://www.pushplus.plus/send?token=xxx&title={title}&content={content}");
+    await page.evaluate(() => globalThis.__wailsEvents["relay-state-changed"]());
+    await page.waitForTimeout(50);
+    if (await page.locator("#taskNotificationEnabled").isChecked() || !(await page.locator("#taskNotificationTokenAutoSwitchFailed").isChecked()) || await page.locator("#taskNotificationWebhookUrl").inputValue() !== "https://www.pushplus.plus/send?token=xxx&title={title}&content={content}") throw new Error("后台状态刷新覆盖了未保存的任务通知设置");
+    await page.fill("#taskNotificationIdleGraceSeconds", "7");
+    await page.click("#saveTaskNotification");
+    if (await page.locator("#taskNotificationEnabled").isChecked() || !(await page.locator("#taskNotificationTokenAutoSwitchFailed").isChecked()) || await page.locator("#taskNotificationWebhookUrl").inputValue() !== "https://www.pushplus.plus/send?token=xxx&title={title}&content={content}" || await page.locator("#taskNotificationIdleGraceSeconds").inputValue() !== "7") throw new Error("任务通知保存后未保留设置");
+    await page.click("#testTaskNotification");
+    await page.waitForTimeout(50);
     await page.click('#settingsTabs button[data-tab="advanced"]');
     if (await page.locator("#dataDirectory").inputValue() !== "C:\\Users\\Ricky-Desktop\\.CodexRelay") throw new Error("CodexRelay 默认数据目录未显示");
     if (await page.locator(".client-config-row").count() !== 2) throw new Error("外部客户端路径行未显示");
     if ((await page.locator(".client-config-row").first().textContent()).includes("config.toml") || (await page.locator(".client-config-row").nth(1).textContent()).includes("settings.json")) throw new Error("外部客户端配置文件名仍显示");
+    await page.locator('.client-config-row').first().locator('input[type="text"]').fill("C:\\Users\\Ricky-Desktop\\.codex-draft");
+    await page.evaluate(() => globalThis.__wailsEvents["relay-state-changed"]());
+    await page.waitForTimeout(50);
+    if (await page.locator('.client-config-row').first().locator('input[type="text"]').inputValue() !== "C:\\Users\\Ricky-Desktop\\.codex-draft") throw new Error("后台状态刷新覆盖了未保存的客户端目录");
     await page.locator('.client-config-row').first().locator('button').first().click();
     await page.waitForTimeout(50);
-    if (await page.locator('.client-config-row').first().locator('input[type="text"]').inputValue() !== "C:\\Users\\Ricky-Desktop\\.codex\\picked") throw new Error("外部客户端路径选择未保存");
+    if (await page.locator('.client-config-row').first().locator('input[type="text"]').inputValue() !== "C:\\Users\\Ricky-Desktop\\.codex-draft\\picked") throw new Error("外部客户端路径选择未保存");
     const claudeSkip = page.locator('.client-config-row').nth(1).locator('input[type="checkbox"]');
     if (!(await claudeSkip.isChecked())) throw new Error("跳过配置文件替换状态未显示");
     await claudeSkip.uncheck();
@@ -307,6 +373,11 @@ const server = http.createServer((request, response) => {
     await page.waitForTimeout(50);
     if (await page.locator("#dataDirectory").inputValue() !== "C:\\Users\\Ricky-Desktop\\.CodexRelay\\picked") throw new Error("CodexRelay 数据目录选择未保存");
     await page.click('#settingsTabs button[data-tab="general"]');
+    await page.fill("#authFailureThreshold", "9");
+    await page.fill("#balanceAlertThresholdUSD", "2.50");
+    await page.evaluate(() => globalThis.__wailsEvents["relay-state-changed"]());
+    await page.waitForTimeout(50);
+    if (await page.locator("#authFailureThreshold").inputValue() !== "9" || await page.locator("#balanceAlertThresholdUSD").inputValue() !== "2.50") throw new Error("后台状态刷新覆盖了未保存的通用设置阈值");
     const settingsGrid = await page.evaluate(() => ({
       triggerColumns: getComputedStyle(document.querySelector(".trigger-option-grid")).gridTemplateColumns.split(" ").length,
       categoryColumns: getComputedStyle(document.querySelector(".category-visibility-grid")).gridTemplateColumns.split(" ").length,
@@ -358,6 +429,12 @@ const server = http.createServer((request, response) => {
     await page.screenshot({ path: path.join(projectRoot, ".tmp", "settings-scroll-ui-smoke.png") });
     await page.click('#settingsTabs button[data-tab="network"]');
     if (await page.locator("#proxyPort").inputValue() !== "8765") throw new Error("默认监听端口未显示");
+    await page.click('#networkModes button[data-mode="manual"]');
+    await page.fill("#manualProxy", "http://127.0.0.1:18880");
+    await page.fill("#proxyPort", "18765");
+    await page.evaluate(() => globalThis.__wailsEvents["relay-state-changed"]());
+    await page.waitForTimeout(50);
+    if (await page.locator("#manualProxy").inputValue() !== "http://127.0.0.1:18880" || await page.locator("#proxyPort").inputValue() !== "18765" || !(await page.locator('#networkModes button[data-mode="manual"]').evaluate((button) => button.classList.contains("active")))) throw new Error("后台状态刷新覆盖了未保存的网络设置");
     await page.fill("#proxyPort", "18766");
     await page.click("#saveProxyPort");
     if (await page.locator("#proxyPort").inputValue() !== "18766") throw new Error("监听端口保存失败");
@@ -501,7 +578,10 @@ const server = http.createServer((request, response) => {
     if (!(await switchPopup.locator("#tokenSwitchMessage").textContent()).includes("HTTP 403")) throw new Error("令牌切换提示未显示");
     if (await switchPopup.locator("#notificationTitle").textContent() !== "令牌切换提醒" || !(await switchPopup.locator("#tokenStopPanel").isHidden())) throw new Error("手动提示错误显示了自动停止状态");
     const switchCandidates = await switchPopup.locator("#tokenSwitchCandidates option").allTextContents();
-    if (switchCandidates.join("|") !== "Codex 低价组 (GPT低价组·0.02)|Codex 稳定组 (GPT稳定组·0.025)|OpenRouter 主线路（自定义 API）") throw new Error("候选令牌格式错误");
+    if (switchCandidates.join("|") !== "请选择|Codex 低价组 (GPT低价组·0.02)|Codex 稳定组 (GPT稳定组·0.025)|OpenRouter 主线路（自定义 API）") throw new Error("候选令牌格式错误");
+    if (!(await switchPopup.locator("#confirmTokenSwitch").isDisabled())) throw new Error("未选择令牌时确定按钮应禁用");
+    await switchPopup.selectOption("#tokenSwitchCandidates", "doge-42");
+    if (await switchPopup.locator("#confirmTokenSwitch").isDisabled()) throw new Error("选择令牌后确定按钮未启用");
     if (await switchPopup.locator("#cancelTokenSwitch").textContent() !== "取消" || await switchPopup.locator("#confirmTokenSwitch").textContent() !== "确定") throw new Error("令牌切换按钮文案错误");
     if (await switchPopup.locator("button:visible").count() !== 2 || !(await switchPopup.locator("#dismissNotification").isHidden())) throw new Error("令牌切换窗口出现多余操作按钮");
     const switchCard = await switchPopup.locator("#notificationCard").boundingBox();
@@ -642,6 +722,14 @@ const server = http.createServer((request, response) => {
     await onboarding.screenshot({ path: path.join(projectRoot, ".tmp", "onboarding-ui-smoke.png"), fullPage: true });
     await onboarding.close();
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.click('#settingsTabs button[data-tab="taskNotification"]');
+    const mobileTaskNotificationLayout = await page.evaluate(() => ({
+      numberColumns: getComputedStyle(document.querySelector(".task-notification-number-fields")).gridTemplateColumns.split(" ").length,
+      panelWidth: document.querySelector("#taskNotificationPanel").getBoundingClientRect().width,
+      viewportWidth: document.documentElement.clientWidth,
+    }));
+    if (mobileTaskNotificationLayout.numberColumns !== 1 || mobileTaskNotificationLayout.panelWidth > mobileTaskNotificationLayout.viewportWidth) throw new Error(`移动端任务通知布局错误: ${JSON.stringify(mobileTaskNotificationLayout)}`);
+    await page.screenshot({ path: path.join(projectRoot, ".tmp", "task-notification-mobile-ui-smoke.png"), fullPage: true });
     await page.click('#settingsTabs button[data-tab="general"]');
     const mobileSettingsLayout = await page.evaluate(() => {
       const view = document.querySelector("#settingsView");

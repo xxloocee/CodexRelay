@@ -136,6 +136,158 @@ export class Preferences {
 }
 
 /**
+ * TaskNotification 保存本机事件通知的直接访问 URL、事件范围和投递边界。
+ * URL 由用户完整填写，可在需要消息的查询参数位置使用 {title}、{content} 占位符。
+ */
+export class TaskNotification {
+    /**
+     * Creates a new TaskNotification instance.
+     * @param {Partial<TaskNotification>} [$$source = {}] - The source object to create the TaskNotification.
+     */
+    constructor($$source = {}) {
+        if (!("enabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["enabled"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["webhookUrl"] = undefined;
+        }
+        if (!("events" in $$source)) {
+            /**
+             * @member
+             * @type {TaskNotificationEvents}
+             */
+            this["events"] = (new TaskNotificationEvents());
+        }
+        if (!("eventsInitialized" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["eventsInitialized"] = false;
+        }
+        if (!("idleGraceSeconds" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["idleGraceSeconds"] = 0;
+        }
+        if (!("requestTimeoutSeconds" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["requestTimeoutSeconds"] = 0;
+        }
+        if (!("maxAttempts" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["maxAttempts"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TaskNotification instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TaskNotification}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("events" in $$parsedSource) {
+            $$parsedSource["events"] = $$createField2_0($$parsedSource["events"]);
+        }
+        return new TaskNotification(/** @type {Partial<TaskNotification>} */($$parsedSource));
+    }
+}
+
+/**
+ * TaskNotificationEvents 描述允许进入本地耐久队列的通知事件。所有事件只访问用户
+ * 预先填写的完整 URL，不携带任务、账户或令牌的动态内容。
+ */
+export class TaskNotificationEvents {
+    /**
+     * Creates a new TaskNotificationEvents instance.
+     * @param {Partial<TaskNotificationEvents>} [$$source = {}] - The source object to create the TaskNotificationEvents.
+     */
+    constructor($$source = {}) {
+        if (!("taskCompleted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["taskCompleted"] = false;
+        }
+        if (!("taskAborted" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["taskAborted"] = false;
+        }
+        if (!("tokenRequestFailed" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["tokenRequestFailed"] = false;
+        }
+        if (!("tokenAutoSwitched" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["tokenAutoSwitched"] = false;
+        }
+        if (!("tokenAutoSwitchFailed" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["tokenAutoSwitchFailed"] = false;
+        }
+        if (!("accountBalanceLow" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["accountBalanceLow"] = false;
+        }
+        if (!("subscriptionBalanceLow" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["subscriptionBalanceLow"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TaskNotificationEvents instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TaskNotificationEvents}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TaskNotificationEvents(/** @type {Partial<TaskNotificationEvents>} */($$parsedSource));
+    }
+}
+
+/**
  * TokenSwitchSettings 保存所有来源共用的令牌故障处理策略。
  * 候选仍限制在当前请求类别；来源只决定候选 Profile 的连接信息，不参与故障处理分流。
  */
@@ -239,3 +391,4 @@ export class TokenSwitchSettings {
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = TaskNotificationEvents.createFrom;

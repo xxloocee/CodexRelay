@@ -276,8 +276,8 @@ export function SetClientConfigSkip(category, skip) {
 }
 
 /**
- * SetDataDirectory 迁移 config.json 和 usage.json，并让当前进程后续读写使用新目录。
- * 目标同名文件不会覆盖；迁移成功后清理旧目录中的两个 CodexRelay 数据文件。
+ * SetDataDirectory 迁移 config.json、usage.json 和任务通知私有队列，并让当前进程后续读写使用新目录。
+ * 目标同名文件或任务通知状态不会覆盖；主配置失败会删除本次预复制的通知状态。
  * @param {string} directory
  * @returns {$CancellablePromise<void>}
  */
@@ -350,6 +350,16 @@ export function SetProxyPort(port) {
 }
 
 /**
+ * SetTaskNotification 保存独立任务完成通知的完整访问 URL 和重试设置。
+ * 修改只影响后台 watcher；它不写入 Codex 的 config.toml、hooks.json 或系统代理。
+ * @param {config$0.TaskNotification} input
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetTaskNotification(input) {
+    return $Call.ByID(3515011149, input);
+}
+
+/**
  * SetTokenSwitchSettings 保存所有来源共用的故障触发、阈值和候选循环策略。
  * 关闭或重新开启某个错误类型会清理其旧统计；阈值、窗口和模式变化则基于仍有效的其他统计重新评估。
  * @param {config$0.TokenSwitchSettings} input
@@ -404,6 +414,15 @@ export function TestProfile(id) {
     return $Call.ByID(2130459618, id).then(/** @type {($result: any) => any} */(($result) => {
         return $$createType5($result);
     }));
+}
+
+/**
+ * TestTaskNotification 由用户在设置页确认后测试当前 Webhook。测试请求不包含
+ * rollout、任务标识、路径、prompt 或最终回复，失败不会改变 pending/outbox 队列。
+ * @returns {$CancellablePromise<void>}
+ */
+export function TestTaskNotification() {
+    return $Call.ByID(1947134911);
 }
 
 /**

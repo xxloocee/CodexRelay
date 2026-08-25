@@ -30,6 +30,7 @@ import (
 	"codexrelay/internal/network"
 	"codexrelay/internal/platform"
 	"codexrelay/internal/relay"
+	"codexrelay/internal/tasknotify"
 	"codexrelay/internal/usage"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -65,7 +66,20 @@ type DesktopState struct {
 	UptimeSeconds    int64                      `json:"uptimeSeconds"`
 	Preferences      config.Preferences         `json:"preferences"`
 	TokenSwitch      config.TokenSwitchSettings `json:"tokenSwitch"`
+	TaskNotification TaskNotificationState      `json:"taskNotification"`
 	Doge             DogeState                  `json:"doge"`
+}
+
+// TaskNotificationState 是消息通知设置和后台队列的公开快照。通知 URL 仅在投递时
+// 替换 {title}、{content}，状态计数和事件选择均不包含 Codex 任务、账户或令牌内容。
+type TaskNotificationState struct {
+	Enabled               bool                          `json:"enabled"`
+	WebhookURL            string                        `json:"webhookUrl"`
+	Events                config.TaskNotificationEvents `json:"events"`
+	IdleGraceSeconds      int                           `json:"idleGraceSeconds"`
+	RequestTimeoutSeconds int                           `json:"requestTimeoutSeconds"`
+	MaxAttempts           int                           `json:"maxAttempts"`
+	Status                tasknotify.Status             `json:"status"`
 }
 
 type DogeState struct {
@@ -280,27 +294,31 @@ type TestResult struct {
 }
 
 type DesktopService struct {
-	runtime              *relay.Runtime
-	server               *http.Server
-	listener             net.Listener
-	mu                   sync.Mutex
-	onStateChanged       func()
-	stateChanged         []func()
-	needsOnboarding      bool
-	dogeMu               sync.Mutex
-	updateMu             sync.Mutex
-	failoverMu           sync.Mutex
-	dogeSyncing          bool
-	dogeSyncPhase        string
-	announcementSyncing  bool
-	dogeAlertsSuppressed bool
-	switchMu             sync.Mutex
-	switchPrompts        map[string]*tokenSwitchPromptState
-	switchRounds         map[string]*tokenSwitchRound
-	directorySwitches    map[string]*tokenSwitchContext
-	autoSwitchNotices    map[string]*PublicDogeTokenSwitchPrompt
-	syncCancel           context.CancelFunc
-	syncStarted          bool
+	runtime                  *relay.Runtime
+	server                   *http.Server
+	listener                 net.Listener
+	mu                       sync.Mutex
+	onStateChanged           func()
+	stateChanged             []func()
+	needsOnboarding          bool
+	dogeMu                   sync.Mutex
+	updateMu                 sync.Mutex
+	failoverMu               sync.Mutex
+	dogeSyncing              bool
+	dogeSyncPhase            string
+	announcementSyncing      bool
+	dogeAlertsSuppressed     bool
+	switchMu                 sync.Mutex
+	switchPrompts            map[string]*tokenSwitchPromptState
+	switchRounds             map[string]*tokenSwitchRound
+	directorySwitches        map[string]*tokenSwitchContext
+	directoryRecoveryNotices map[string]*PublicDogeTokenSwitchPrompt
+	autoSwitchNotices        map[string]*PublicDogeTokenSwitchPrompt
+	syncCancel               context.CancelFunc
+	syncStarted              bool
+	taskNotifier             *tasknotify.Manager
+	taskNotifyCancel         context.CancelFunc
+	taskNotifyStarted        bool
 }
 
 type tokenSwitchPromptState struct {
@@ -316,6 +334,14 @@ type tokenSwitchRound struct {
 	Stopped      bool
 	StoppedAt    time.Time
 	StopMessage  string
+}
+
+// taskNotificationEvent 保存已确认的本地状态变化及其本地去重标识。该标识只写入
+// 耐久队列，不会被追加到用户配置的推送 URL。
+type taskNotificationEvent struct {
+	Type     string
+	Identity string
+	Details  tasknotify.EventDetails
 }
 
 type tokenSwitchContext struct {
@@ -344,8 +370,16 @@ const (
 func NewDesktopService(runtime *relay.Runtime) *DesktopService {
 	service := &DesktopService{
 		runtime: runtime, switchPrompts: make(map[string]*tokenSwitchPromptState), switchRounds: make(map[string]*tokenSwitchRound),
-		directorySwitches: make(map[string]*tokenSwitchContext), autoSwitchNotices: make(map[string]*PublicDogeTokenSwitchPrompt),
+		directorySwitches: make(map[string]*tokenSwitchContext), directoryRecoveryNotices: make(map[string]*PublicDogeTokenSwitchPrompt), autoSwitchNotices: make(map[string]*PublicDogeTokenSwitchPrompt),
 	}
+	service.taskNotifier = tasknotify.NewManager(func() tasknotify.Settings {
+		state := runtime.State()
+		if state == nil {
+			return tasknotify.Settings{}
+		}
+		setting := state.Config.TaskNotification
+		return tasknotify.Settings{Enabled: setting.Enabled, WebhookURL: setting.WebhookURL, Events: tasknotify.EventSettings{TaskCompleted: setting.Events.TaskCompleted, TaskAborted: setting.Events.TaskAborted, TokenRequestFailed: setting.Events.TokenRequestFailed, TokenAutoSwitched: setting.Events.TokenAutoSwitched, TokenAutoSwitchFailed: setting.Events.TokenAutoSwitchFailed, AccountBalanceLow: setting.Events.AccountBalanceLow, SubscriptionBalanceLow: setting.Events.SubscriptionBalanceLow}, IdleGraceSeconds: setting.IdleGraceSeconds, RequestTimeoutSeconds: setting.RequestTimeoutSeconds, MaxAttempts: setting.MaxAttempts}
+	}, runtime.DataDirectory, service.notifyStateChanged)
 	runtime.SetHealthChangedHandler(service.handleHealthChanged)
 	runtime.SetResultObservedHandler(service.handleUpstreamResult)
 	return service
@@ -469,6 +503,16 @@ func (s *DesktopService) ServiceStartup(_ context.Context, _ application.Service
 		}
 	}()
 	s.mu.Lock()
+	if !s.taskNotifyStarted {
+		s.taskNotifyStarted = true
+		ctx, cancel := context.WithCancel(context.Background())
+		s.taskNotifyCancel = cancel
+		s.mu.Unlock()
+		s.taskNotifier.Start(ctx)
+	} else {
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
 	if !s.syncStarted {
 		s.syncStarted = true
 		ctx, cancel := context.WithCancel(context.Background())
@@ -491,9 +535,13 @@ func (s *DesktopService) ServiceShutdown() error {
 	s.mu.Lock()
 	server := s.server
 	cancel := s.syncCancel
+	taskNotifyCancel := s.taskNotifyCancel
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if taskNotifyCancel != nil {
+		taskNotifyCancel()
 	}
 	if server == nil {
 		return nil
@@ -595,13 +643,32 @@ func (s *DesktopService) GetState() DesktopState {
 		LocalAccessToken: state.Config.LocalAccessToken, ActiveProfiles: state.Config.ActiveProfiles,
 		Profiles: profiles, FailoverOrder: config.NormalizeFailoverOrder(state.Config.FailoverOrder, state.Config.Profiles), ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,
 		Requests: s.runtime.RecentRecords(), Usage: s.runtime.UsageOverview(), UptimeSeconds: int64(s.runtime.Uptime().Seconds()),
-		Preferences: state.Config.Preferences, TokenSwitch: state.Config.TokenSwitch, Doge: dogeState,
+		Preferences: state.Config.Preferences, TokenSwitch: state.Config.TokenSwitch,
+		TaskNotification: publicTaskNotification(state.Config.TaskNotification, s.taskNotifier.Status()),
+		Doge:             dogeState,
 	}
 }
 
-// handleHealthChanged 在健康阈值首次触发时执行自动切换；失败轮次耗尽后保留停止状态提醒。
+func publicTaskNotification(setting config.TaskNotification, status tasknotify.Status) TaskNotificationState {
+	setting = config.NormalizeTaskNotification(setting)
+	return TaskNotificationState{Enabled: setting.Enabled, WebhookURL: setting.WebhookURL, Events: setting.Events, IdleGraceSeconds: setting.IdleGraceSeconds, RequestTimeoutSeconds: setting.RequestTimeoutSeconds, MaxAttempts: setting.MaxAttempts, Status: status}
+}
+
+// enqueueTaskNotificationEvent 只把已确认的本地事件交给后台耐久队列。投递和重试
+// 由 watcher 的周期 worker 执行，不能在代理请求或二狗子同步调用栈中等待网络结果。
+func (s *DesktopService) enqueueTaskNotificationEvent(eventType, identity string, details ...tasknotify.EventDetails) {
+	if s.taskNotifier == nil {
+		return
+	}
+	if err := s.taskNotifier.Enqueue(eventType, identity, details...); err != nil {
+		application.Get().Logger.Warn("创建消息通知待投递记录失败", "error", err)
+	}
+}
+
+// handleHealthChanged 在健康阈值首次触发时记录独立故障通知，再按设置执行自动切换；失败轮次耗尽后保留停止状态提醒。
 // 回调由 relay 在请求完成后调用，因此只改变后续请求使用的活动 Profile，不重放已经失败的请求。
 func (s *DesktopService) handleHealthChanged() {
+	s.enqueueTokenRequestFailureNotifications()
 	s.failoverMu.Lock()
 	prompts := s.buildTokenSwitchPrompts()
 	previousIDs := make([]string, 0, len(prompts))
@@ -619,6 +686,41 @@ func (s *DesktopService) handleHealthChanged() {
 		s.runtime.ResetProfileHealth(previousID)
 	}
 	s.notifyStateChanged()
+}
+
+// enqueueTokenRequestFailureNotifications 为每个达到健康阈值的活动 Profile 创建一条独立通知。
+// 该事件不依赖自动切换模式；身份包含触发代数，保证同一故障轮次不会因状态刷新重复入队。
+// 只保存类别、故障类别、次数、状态码和时间，不保存令牌名称、密钥或错误正文。
+func (s *DesktopService) enqueueTokenRequestFailureNotifications() {
+	state := s.runtime.State()
+	if state == nil {
+		return
+	}
+	for _, health := range s.runtime.HealthSnapshots() {
+		failureKind := ""
+		switch {
+		case health.AuthTriggered:
+			failureKind = "auth"
+		case health.UpstreamTriggered:
+			failureKind = "upstream"
+		default:
+			continue
+		}
+		profileIndex := config.FindProfileIndex(state.Config.Profiles, health.ProfileID)
+		if profileIndex < 0 || state.Config.ActiveProfiles[health.Category] != health.ProfileID {
+			continue
+		}
+		identity := strings.Join([]string{health.ProfileID, failureKind, strconv.Itoa(health.LastStatus), strconv.FormatUint(health.TriggerGeneration, 10)}, "\x00")
+		s.enqueueTaskNotificationEvent(tasknotify.EventTokenRequestFailed, identity, tasknotify.EventDetails{
+			OccurredAt: health.LastFailureAt, Category: health.Category, FailureKind: failureKind,
+			FailureCount: func() int {
+				if failureKind == "auth" {
+					return health.AuthFailures
+				}
+				return health.UpstreamFailures
+			}(), FailureStatus: health.LastStatus, FailureWindowMinutes: state.Config.TokenSwitch.UpstreamFailureWindowMinutes,
+		})
+	}
 }
 
 // handleUpstreamResult 在当前活动令牌真正成功后结束该类别的故障轮次。
@@ -670,6 +772,9 @@ func (s *DesktopService) tryAutomaticTokenSwitch(prompt *PublicDogeTokenSwitchPr
 		s.recordTokenSwitch(prompt.Category, prompt.CurrentName, candidate.Name, historyFailureMessage(prompt))
 		s.clearSwitchPrompt(prompt.Key)
 		s.setAutoSwitchNotice(prompt, candidate.Name)
+		s.enqueueTaskNotificationEvent(tasknotify.EventTokenAutoSwitched, fmt.Sprintf("%s\x00%s\x00%d", prompt.Key, candidate.ProfileID, time.Now().UnixNano()), tasknotify.EventDetails{
+			OccurredAt: time.Now(), Category: prompt.Category, FromGroup: prompt.CurrentGroup, ToGroup: candidate.Group,
+		})
 		return true, prompt.CurrentProfileID
 	}
 
@@ -792,6 +897,9 @@ func (s *DesktopService) stopTokenSwitchRound(prompt *PublicDogeTokenSwitchPromp
 	}
 	s.autoSwitchNotices[prompt.Category] = &notice
 	switchMu.Unlock()
+	s.enqueueTaskNotificationEvent(tasknotify.EventTokenAutoSwitchFailed, fmt.Sprintf("%s\x00%d", prompt.Key, time.Now().UnixNano()), tasknotify.EventDetails{
+		OccurredAt: time.Now(), Category: prompt.Category, FromGroup: prompt.CurrentGroup, ToGroup: "无可用分组",
+	})
 }
 
 func historyFailureMessage(prompt *PublicDogeTokenSwitchPrompt) string {
@@ -826,6 +934,11 @@ func (s *DesktopService) clearSwitchPrompt(key string) {
 			delete(s.directorySwitches, category)
 		}
 	}
+	for category, notice := range s.directoryRecoveryNotices {
+		if notice != nil && notice.Key == key {
+			delete(s.directoryRecoveryNotices, category)
+		}
+	}
 	s.switchMu.Unlock()
 }
 
@@ -840,6 +953,9 @@ func (s *DesktopService) currentTokenSwitchPrompts() map[string]*PublicDogeToken
 	s.switchMu.Lock()
 	for category, notice := range s.autoSwitchNotices {
 		if notice == nil {
+			continue
+		}
+		if prompt := prompts[category]; prompt != nil && prompt.FailureKind == "directory_recovered" {
 			continue
 		}
 		clone := *notice
@@ -996,6 +1112,19 @@ func (s *DesktopService) buildTokenSwitchPrompts() map[string]*PublicDogeTokenSw
 			result[category] = s.applyTokenSwitchRound(publicDogeTokenSwitchPrompt(item.context), state.Config.TokenSwitch.Mode == config.TokenSwitchModeAuto)
 		}
 	}
+	s.switchMu.Lock()
+	for category, notice := range s.directoryRecoveryNotices {
+		if notice == nil {
+			continue
+		}
+		if state.Config.ActiveProfiles[category] != notice.CurrentProfileID || result[category] != nil {
+			continue
+		}
+		clone := *notice
+		clone.Candidates = append([]PublicDogeTokenSwitchCandidate(nil), notice.Candidates...)
+		result[category] = &clone
+	}
+	s.switchMu.Unlock()
 	return result
 }
 
@@ -1060,11 +1189,133 @@ func (s *DesktopService) dogeDirectorySwitchContexts() map[string]*tokenSwitchCo
 	return result
 }
 
+// cloneDogeDirectorySwitchContexts 复制目录失效快照中会跨同步保留的字段。
+// 恢复判断必须使用上一次同步看到的令牌和分组状态，不能在配置写入后再读取旧快照。
+func cloneDogeDirectorySwitchContexts(source map[string]*tokenSwitchContext) map[string]*tokenSwitchContext {
+	result := make(map[string]*tokenSwitchContext, len(source))
+	for category, item := range source {
+		if item == nil {
+			continue
+		}
+		clone := *item
+		clone.tokens = append([]config.DogeToken(nil), item.tokens...)
+		clone.groups = append([]string(nil), item.groups...)
+		clone.failoverOrder = append([]string(nil), item.failoverOrder...)
+		clone.candidateProfiles = append([]config.Profile(nil), item.candidateProfiles...)
+		clone.profilesByID = make(map[int64]config.Profile, len(item.profilesByID))
+		for id, profile := range item.profilesByID {
+			clone.profilesByID[id] = profile
+		}
+		result[category] = &clone
+	}
+	return result
+}
+
+// recoveredDogeTokens 返回同一类别中从上一次不可用状态恢复为可用的令牌。
+// 旧快照只来自目录失效上下文，且恢复必须同时满足 status、分组权限和完整密钥条件。
+func recoveredDogeTokens(previous *tokenSwitchContext, cfg config.AppConfig) []config.DogeToken {
+	if previous == nil {
+		return nil
+	}
+	currentByID := make(map[int64]config.DogeToken, len(cfg.Doge.Tokens))
+	for _, token := range cfg.Doge.Tokens {
+		currentByID[token.ID] = token
+	}
+	result := make([]config.DogeToken, 0)
+	seen := make(map[int64]struct{})
+	for _, oldToken := range previous.tokens {
+		if oldToken.ID <= 0 || dogeTokenAvailable(oldToken, previous.groups) {
+			continue
+		}
+		profile, belongs := previous.profilesByID[oldToken.ID]
+		if !belongs || profile.Category != previous.profile.Category {
+			continue
+		}
+		current, exists := currentByID[oldToken.ID]
+		if !exists || !dogeTokenSwitchable(current, cfg.Doge.Groups) {
+			continue
+		}
+		if _, ok := seen[current.ID]; ok {
+			continue
+		}
+		seen[current.ID] = struct{}{}
+		result = append(result, current)
+	}
+	return result
+}
+
+// buildDogeDirectoryRecoveryNotice 生成“令牌已恢复”提示；候选使用当前类别的全部可用 Profile，
+// 但排除当前仍在使用的 Profile，避免用户把切换操作提交为无变化。
+func buildDogeDirectoryRecoveryNotice(cfg config.AppConfig, previous *tokenSwitchContext, recovered []config.DogeToken, candidates []config.Profile) *PublicDogeTokenSwitchPrompt {
+	if previous == nil {
+		return nil
+	}
+	current := dogeTokenForProfile(cfg, previous.profile)
+	currentName := strings.TrimSpace(previous.profile.Name)
+	if currentName == "" {
+		currentName = current.Name
+	}
+	currentName = formatNonHomeProfileName(currentName, previous.profile.Source, dogeTokenDisplayGroup(current), current.GroupRatio)
+	if currentName == "" {
+		currentName = "当前令牌"
+	}
+	names := make([]string, 0, len(recovered))
+	for _, token := range recovered {
+		name := strings.TrimSpace(token.Name)
+		if profile, ok := previous.profilesByID[token.ID]; ok && strings.TrimSpace(profile.Name) != "" {
+			name = strings.TrimSpace(profile.Name)
+		}
+		name = formatDogeProfileName(name, dogeTokenDisplayGroup(token), token.GroupRatio)
+		if name != "" {
+			names = append(names, "“"+name+"”")
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	message := fmt.Sprintf("Codex类别（%s）下%s令牌已恢复可用。", categoryDisplayName(previous.profile.Category), strings.Join(names, "、"))
+	return &PublicDogeTokenSwitchPrompt{
+		Key: previous.key + "|recovered", Category: previous.profile.Category, Mode: "manual", FailureKind: "directory_recovered",
+		CurrentTokenID: previous.profile.RemoteTokenID, CurrentProfileID: previous.profile.ID, CurrentName: currentName,
+		CurrentGroup: dogeTokenDisplayGroup(current), CurrentRatio: current.GroupRatio, Message: message,
+		Candidates: publicDogeTokenSwitchCandidates(cfg, candidates, previous.profile.ID),
+	}
+}
+
+func categoryDisplayName(category string) string {
+	switch category {
+	case config.CategoryCodex:
+		return "Codex"
+	case config.CategoryClaude:
+		return "Claude"
+	case config.CategoryGemini:
+		return "Gemini"
+	case config.CategoryGrok:
+		return "Grok"
+	case config.CategoryOpenCode:
+		return "OpenCode"
+	case config.CategoryOpenClaw:
+		return "OpenClaw"
+	case config.CategoryHermes:
+		return "Hermes"
+	case config.CategoryImage:
+		return "生图"
+	case config.CategoryOther:
+		return "其他"
+	default:
+		return category
+	}
+}
+
 // setDogeDirectorySwitchContexts 替换自动同步检测到的各类别目录失效提示。
 // 提示 key 在同一活动令牌持续失效期间保持稳定，用户取消后沿用现有五分钟及持续期间抑制规则。
 func (s *DesktopService) setDogeDirectorySwitchContexts(contexts map[string]*tokenSwitchContext) {
 	state := s.runtime.State()
 	s.switchMu.Lock()
+	if s.directoryRecoveryNotices == nil {
+		s.directoryRecoveryNotices = make(map[string]*PublicDogeTokenSwitchPrompt)
+	}
+	previousContexts := cloneDogeDirectorySwitchContexts(s.directorySwitches)
 	previousKeys := make(map[string]string, len(s.directorySwitches))
 	for category, context := range s.directorySwitches {
 		if context != nil {
@@ -1082,7 +1333,32 @@ func (s *DesktopService) setDogeDirectorySwitchContexts(contexts map[string]*tok
 			changed = true
 		}
 	}
+	for category := range contexts {
+		delete(s.directoryRecoveryNotices, category)
+	}
 	s.switchMu.Unlock()
+	if state != nil {
+		for category, previous := range previousContexts {
+			if previous == nil || previous.directoryReason != dogeDirectoryFailureUnavailable || contexts[category] != nil {
+				continue
+			}
+			if state.Config.ActiveProfiles[category] != previous.profile.ID || config.FindProfileIndex(state.Config.Profiles, previous.profile.ID) < 0 {
+				continue
+			}
+			recoveredTokens := recoveredDogeTokens(previous, state.Config)
+			if len(recoveredTokens) == 0 {
+				continue
+			}
+			candidates := availableFailoverProfiles(state.Config, category)
+			notice := buildDogeDirectoryRecoveryNotice(state.Config, previous, recoveredTokens, candidates)
+			s.switchMu.Lock()
+			if existing := s.directoryRecoveryNotices[category]; existing == nil || existing.Key != notice.Key {
+				s.directoryRecoveryNotices[category] = notice
+				changed = true
+			}
+			s.switchMu.Unlock()
+		}
+	}
 	for _, context := range contexts {
 		if context != nil {
 			state = s.runtime.State()
@@ -1178,8 +1454,7 @@ func publicDogeTokenSwitchPrompt(context tokenSwitchContext) *PublicDogeTokenSwi
 	currentGroup := dogeTokenDisplayGroup(context.token)
 	currentName = formatNonHomeProfileName(currentName, context.profile.Source, currentGroup, context.token.GroupRatio)
 	candidates := make([]PublicDogeTokenSwitchCandidate, 0)
-	profiles := context.candidateProfiles
-	for _, profile := range profiles {
+	for _, profile := range context.candidateProfiles {
 		if profile.ID == context.profile.ID {
 			continue
 		}
@@ -1230,6 +1505,34 @@ func publicDogeTokenSwitchPrompt(context tokenSwitchContext) *PublicDogeTokenSwi
 		CurrentName: currentName, CurrentGroup: currentGroup, CurrentRatio: context.token.GroupRatio,
 		Message: failureMessage, Candidates: candidates,
 	}
+}
+
+func publicDogeTokenSwitchCandidates(cfg config.AppConfig, profiles []config.Profile, currentID string) []PublicDogeTokenSwitchCandidate {
+	candidates := make([]PublicDogeTokenSwitchCandidate, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.ID == currentID {
+			continue
+		}
+		token := dogeTokenForProfile(cfg, profile)
+		name := strings.TrimSpace(profile.Name)
+		if name == "" {
+			name = "代理 API " + profile.ID
+		}
+		group := ""
+		ratio := float64(0)
+		tokenID := int64(0)
+		if profile.Source == config.SourceDoge {
+			tokenID = profile.RemoteTokenID
+			group = dogeTokenDisplayGroup(token)
+			ratio = token.GroupRatio
+		}
+		name = formatNonHomeProfileName(name, profile.Source, group, ratio)
+		candidates = append(candidates, PublicDogeTokenSwitchCandidate{
+			TokenID: tokenID, ProfileID: profile.ID, Name: name, Source: failoverSourceLabel(profile.Source),
+			Group: group, Ratio: ratio, Selectable: true,
+		})
+	}
+	return candidates
 }
 
 // formatNonHomeProfileName 统一托盘、提醒窗口和统计页等非主页位置的 Profile 名称。
@@ -1956,10 +2259,18 @@ func (s *DesktopService) DismissDogeTokenSwitch(key string) error {
 	s.switchMu.Lock()
 	promptState, ok := s.switchPrompts[key]
 	autoNotice := false
+	recoveryNotice := false
 	for category, notice := range s.autoSwitchNotices {
 		if notice != nil && notice.Key == key {
 			delete(s.autoSwitchNotices, category)
 			autoNotice = true
+			break
+		}
+	}
+	for category, notice := range s.directoryRecoveryNotices {
+		if notice != nil && notice.Key == key {
+			delete(s.directoryRecoveryNotices, category)
+			recoveryNotice = true
 			break
 		}
 	}
@@ -1968,7 +2279,7 @@ func (s *DesktopService) DismissDogeTokenSwitch(key string) error {
 		promptState.suppressedUntil = time.Now().Add(5 * time.Minute)
 	}
 	s.switchMu.Unlock()
-	if !ok && !autoNotice {
+	if !ok && !autoNotice && !recoveryNotice {
 		return errors.New("令牌切换提示已失效")
 	}
 	s.notifyStateChanged()
@@ -2187,6 +2498,34 @@ func (s *DesktopService) SetPreferences(input config.Preferences) error {
 		return err
 	}
 	s.notifyStateChanged()
+	return nil
+}
+
+// SetTaskNotification 保存独立任务完成通知的完整访问 URL 和重试设置。
+// 修改只影响后台 watcher；它不写入 Codex 的 config.toml、hooks.json 或系统代理。
+func (s *DesktopService) SetTaskNotification(input config.TaskNotification) error {
+	input.WebhookURL = strings.TrimSpace(input.WebhookURL)
+	// 设置页提交代表用户已明确选择事件范围，允许其关闭全部事件而不被默认值覆盖。
+	input.EventsInitialized = true
+	input = config.NormalizeTaskNotification(input)
+	if err := config.ValidateTaskNotification(input); err != nil {
+		return err
+	}
+	return s.updateConfig(func(cfg *config.AppConfig) error {
+		cfg.TaskNotification = input
+		return nil
+	})
+}
+
+// TestTaskNotification 由用户在设置页确认后测试当前 Webhook。测试请求不包含
+// rollout、任务标识、路径、prompt 或最终回复，失败不会改变 pending/outbox 队列。
+func (s *DesktopService) TestTaskNotification() error {
+	if s.taskNotifier == nil {
+		return errors.New("任务通知服务尚未初始化")
+	}
+	if err := s.taskNotifier.Test(context.Background()); err != nil {
+		return fmt.Errorf("测试任务通知失败: %w", err)
+	}
 	return nil
 }
 

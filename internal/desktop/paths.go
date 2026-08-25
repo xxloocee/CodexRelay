@@ -52,18 +52,35 @@ func normalizeSelectedDirectory(selected string) string {
 	return filepath.Clean(selected)
 }
 
-// SetDataDirectory 迁移 config.json 和 usage.json，并让当前进程后续读写使用新目录。
-// 目标同名文件不会覆盖；迁移成功后清理旧目录中的两个 CodexRelay 数据文件。
+// SetDataDirectory 迁移 config.json、usage.json 和任务通知私有队列，并让当前进程后续读写使用新目录。
+// 目标同名文件或任务通知状态不会覆盖；主配置失败会删除本次预复制的通知状态。
 func (s *DesktopService) SetDataDirectory(directory string) error {
 	directory = filepath.Clean(strings.TrimSpace(directory))
 	if directory == "" || !filepath.IsAbs(directory) {
 		return errors.New("CodexRelay 数据目录必须是绝对路径")
 	}
+	oldDirectory := s.runtime.DataDirectory()
+	copiedTaskNotificationState := false
+	if s.taskNotifier != nil && filepath.Clean(oldDirectory) != directory {
+		var err error
+		copiedTaskNotificationState, err = s.taskNotifier.CopyStateTo(directory)
+		if err != nil {
+			return fmt.Errorf("迁移任务通知状态失败: %w", err)
+		}
+	}
 	oldDirectory, err := s.runtime.MigrateDataDirectory(directory, func() error {
 		return config.SaveDataDirectoryPointer(directory)
 	})
 	if err != nil {
+		if copiedTaskNotificationState && s.taskNotifier != nil {
+			s.taskNotifier.DiscardCopiedState(directory)
+		}
 		return err
+	}
+	if s.taskNotifier != nil {
+		if err := s.taskNotifier.FinalizeMigration(oldDirectory, copiedTaskNotificationState); err != nil {
+			application.Get().Logger.Warn("旧任务通知状态清理失败", "error", err)
+		}
 	}
 	if filepath.Clean(oldDirectory) != directory {
 		for _, name := range []string{"config.json", "usage.json"} {

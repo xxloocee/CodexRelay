@@ -17,6 +17,9 @@ import * as clientconfig$0 from "./clientconfig/models.js";
 import * as network$0 from "../network/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as tasknotify$0 from "../tasknotify/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as usage$0 from "../usage/models.js";
 
 export class DesktopState {
@@ -158,6 +161,13 @@ export class DesktopState {
              */
             this["tokenSwitch"] = (new config$0.TokenSwitchSettings());
         }
+        if (!("taskNotification" in $$source)) {
+            /**
+             * @member
+             * @type {TaskNotificationState}
+             */
+            this["taskNotification"] = (new TaskNotificationState());
+        }
         if (!("doge" in $$source)) {
             /**
              * @member
@@ -187,6 +197,7 @@ export class DesktopState {
         const $$createField17_0 = $$createType12;
         const $$createField18_0 = $$createType13;
         const $$createField19_0 = $$createType14;
+        const $$createField20_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("proxyUrls" in $$parsedSource) {
             $$parsedSource["proxyUrls"] = $$createField6_0($$parsedSource["proxyUrls"]);
@@ -221,8 +232,11 @@ export class DesktopState {
         if ("tokenSwitch" in $$parsedSource) {
             $$parsedSource["tokenSwitch"] = $$createField18_0($$parsedSource["tokenSwitch"]);
         }
+        if ("taskNotification" in $$parsedSource) {
+            $$parsedSource["taskNotification"] = $$createField19_0($$parsedSource["taskNotification"]);
+        }
         if ("doge" in $$parsedSource) {
-            $$parsedSource["doge"] = $$createField19_0($$parsedSource["doge"]);
+            $$parsedSource["doge"] = $$createField20_0($$parsedSource["doge"]);
         }
         return new DesktopState(/** @type {Partial<DesktopState>} */($$parsedSource));
     }
@@ -419,14 +433,14 @@ export class DogeState {
      * @returns {DogeState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType15;
-        const $$createField3_0 = $$createType16;
-        const $$createField7_0 = $$createType18;
+        const $$createField2_0 = $$createType16;
+        const $$createField3_0 = $$createType17;
+        const $$createField7_0 = $$createType19;
         const $$createField10_0 = $$createType3;
-        const $$createField11_0 = $$createType20;
-        const $$createField12_0 = $$createType21;
-        const $$createField13_0 = $$createType23;
-        const $$createField14_0 = $$createType24;
+        const $$createField11_0 = $$createType21;
+        const $$createField12_0 = $$createType22;
+        const $$createField13_0 = $$createType24;
+        const $$createField14_0 = $$createType25;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("account" in $$parsedSource) {
             $$parsedSource["account"] = $$createField2_0($$parsedSource["account"]);
@@ -633,7 +647,7 @@ export class ProfileInput {
      */
     static createFrom($$source = {}) {
         const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType26;
+        const $$createField8_0 = $$createType27;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
@@ -937,8 +951,8 @@ export class PublicDogeNotifications {
      * @returns {PublicDogeNotifications}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType28;
-        const $$createField5_0 = $$createType30;
+        const $$createField3_0 = $$createType29;
+        const $$createField5_0 = $$createType31;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("announcements" in $$parsedSource) {
             $$parsedSource["announcements"] = $$createField3_0($$parsedSource["announcements"]);
@@ -1473,8 +1487,8 @@ export class PublicDogeTokenSwitchPrompt {
      * @returns {PublicDogeTokenSwitchPrompt}
      */
     static createFrom($$source = {}) {
-        const $$createField14_0 = $$createType32;
-        const $$createField15_0 = $$createType34;
+        const $$createField14_0 = $$createType33;
+        const $$createField15_0 = $$createType35;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("candidates" in $$parsedSource) {
             $$parsedSource["candidates"] = $$createField14_0($$parsedSource["candidates"]);
@@ -1653,7 +1667,7 @@ export class PublicProfile {
      */
     static createFrom($$source = {}) {
         const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType36;
+        const $$createField8_0 = $$createType37;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
@@ -1662,6 +1676,88 @@ export class PublicProfile {
             $$parsedSource["models"] = $$createField8_0($$parsedSource["models"]);
         }
         return new PublicProfile(/** @type {Partial<PublicProfile>} */($$parsedSource));
+    }
+}
+
+/**
+ * TaskNotificationState 是消息通知设置和后台队列的公开快照。通知 URL 仅在投递时
+ * 替换 {title}、{content}，状态计数和事件选择均不包含 Codex 任务、账户或令牌内容。
+ */
+export class TaskNotificationState {
+    /**
+     * Creates a new TaskNotificationState instance.
+     * @param {Partial<TaskNotificationState>} [$$source = {}] - The source object to create the TaskNotificationState.
+     */
+    constructor($$source = {}) {
+        if (!("enabled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["enabled"] = false;
+        }
+        if (!("webhookUrl" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["webhookUrl"] = "";
+        }
+        if (!("events" in $$source)) {
+            /**
+             * @member
+             * @type {config$0.TaskNotificationEvents}
+             */
+            this["events"] = (new config$0.TaskNotificationEvents());
+        }
+        if (!("idleGraceSeconds" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["idleGraceSeconds"] = 0;
+        }
+        if (!("requestTimeoutSeconds" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["requestTimeoutSeconds"] = 0;
+        }
+        if (!("maxAttempts" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["maxAttempts"] = 0;
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {tasknotify$0.Status}
+             */
+            this["status"] = (new tasknotify$0.Status());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TaskNotificationState instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {TaskNotificationState}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType38;
+        const $$createField6_0 = $$createType39;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("events" in $$parsedSource) {
+            $$parsedSource["events"] = $$createField2_0($$parsedSource["events"]);
+        }
+        if ("status" in $$parsedSource) {
+            $$parsedSource["status"] = $$createField6_0($$parsedSource["status"]);
+        }
+        return new TaskNotificationState(/** @type {Partial<TaskNotificationState>} */($$parsedSource));
     }
 }
 
@@ -1806,26 +1902,29 @@ const $$createType10 = $Create.Array($$createType9);
 const $$createType11 = usage$0.Overview.createFrom;
 const $$createType12 = config$0.Preferences.createFrom;
 const $$createType13 = config$0.TokenSwitchSettings.createFrom;
-const $$createType14 = DogeState.createFrom;
-const $$createType15 = PublicDogeAccount.createFrom;
-const $$createType16 = $Create.Map($Create.Any, $Create.Any);
-const $$createType17 = PublicDogeSubscription.createFrom;
-const $$createType18 = $Create.Array($$createType17);
-const $$createType19 = PublicDogeToken.createFrom;
-const $$createType20 = $Create.Array($$createType19);
-const $$createType21 = PublicDogeNotifications.createFrom;
-const $$createType22 = PublicDogeTokenSwitchPrompt.createFrom;
-const $$createType23 = $Create.Nullable($$createType22);
-const $$createType24 = $Create.Map($Create.Any, $$createType23);
-const $$createType25 = ModelInput.createFrom;
-const $$createType26 = $Create.Array($$createType25);
-const $$createType27 = PublicDogeAnnouncement.createFrom;
-const $$createType28 = $Create.Array($$createType27);
-const $$createType29 = PublicDogeAlert.createFrom;
-const $$createType30 = $Create.Array($$createType29);
-const $$createType31 = PublicDogeTokenSwitchCandidate.createFrom;
-const $$createType32 = $Create.Array($$createType31);
-const $$createType33 = PublicDogeTokenSwitchHistory.createFrom;
-const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = PublicModel.createFrom;
-const $$createType36 = $Create.Array($$createType35);
+const $$createType14 = TaskNotificationState.createFrom;
+const $$createType15 = DogeState.createFrom;
+const $$createType16 = PublicDogeAccount.createFrom;
+const $$createType17 = $Create.Map($Create.Any, $Create.Any);
+const $$createType18 = PublicDogeSubscription.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = PublicDogeToken.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = PublicDogeNotifications.createFrom;
+const $$createType23 = PublicDogeTokenSwitchPrompt.createFrom;
+const $$createType24 = $Create.Nullable($$createType23);
+const $$createType25 = $Create.Map($Create.Any, $$createType24);
+const $$createType26 = ModelInput.createFrom;
+const $$createType27 = $Create.Array($$createType26);
+const $$createType28 = PublicDogeAnnouncement.createFrom;
+const $$createType29 = $Create.Array($$createType28);
+const $$createType30 = PublicDogeAlert.createFrom;
+const $$createType31 = $Create.Array($$createType30);
+const $$createType32 = PublicDogeTokenSwitchCandidate.createFrom;
+const $$createType33 = $Create.Array($$createType32);
+const $$createType34 = PublicDogeTokenSwitchHistory.createFrom;
+const $$createType35 = $Create.Array($$createType34);
+const $$createType36 = PublicModel.createFrom;
+const $$createType37 = $Create.Array($$createType36);
+const $$createType38 = config$0.TaskNotificationEvents.createFrom;
+const $$createType39 = tasknotify$0.Status.createFrom;

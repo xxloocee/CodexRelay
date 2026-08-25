@@ -119,6 +119,13 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Preferences.RestoreViewMode == "" {
 		cfg.Preferences.RestoreViewMode = RestoreViewCurrent
 	}
+	if cfg.TaskNotification.IdleGraceSeconds == 0 {
+		cfg.TaskNotification.IdleGraceSeconds = DefaultTaskNotificationIdleGraceSeconds
+	}
+	if cfg.TaskNotification.RequestTimeoutSeconds == 0 {
+		cfg.TaskNotification.RequestTimeoutSeconds = DefaultTaskNotificationRequestTimeoutSeconds
+	}
+	cfg.TaskNotification = NormalizeTaskNotification(cfg.TaskNotification)
 	cfg.FailoverOrder = NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 	if err := Validate(cfg); err != nil {
 		return AppConfig{}, err
