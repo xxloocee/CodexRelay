@@ -38,6 +38,7 @@ import {
   SetDogeSyncInterval,
   SetTokenSwitchSettings,
   SetDogeAlertSettings,
+  SetProxyListenAllInterfaces,
   SetProxyPort,
   SetPreferences,
   SetProfileAutoSwitch,
@@ -86,7 +87,9 @@ const app = {
   networkModeDirty: false,
   networkProxyDirty: false,
   networkPortDirty: false,
+  networkListenDirty: false,
   networkDraftRevision: 0,
+  networkListenDraftRevision: 0,
   clientConfigDrafts: {},
   clientConfigSkipDrafts: {},
   taskNotificationDirty: false,
@@ -639,8 +642,8 @@ function openDogeTopupModal() {
     toast("请先在设置中绑定二狗子 API", true);
     return;
   }
-  renderDogeTopupState();
   $("dogeTopupError").dataset.submission = "";
+  renderDogeTopupState();
   $("dogeTopupModal").classList.remove("hidden");
   syncModalBody();
   setTimeout(() => $("dogeTopupCode").focus(), 0);
@@ -1889,7 +1892,7 @@ function markDogeAlertDirty() {
 }
 
 function renderNetworkDraftState() {
-  const preserveDraft = app.networkModeDirty || app.networkProxyDirty || app.networkPortDirty;
+  const preserveDraft = app.networkModeDirty || app.networkProxyDirty || app.networkPortDirty || app.networkListenDirty;
   if (!preserveDraft) {
     document.querySelectorAll("#networkModes button").forEach((button) => {
       button.classList.toggle("active", button.dataset.mode === app.state.network.mode);
@@ -1897,6 +1900,7 @@ function renderNetworkDraftState() {
     $("manualProxyRow").classList.toggle("hidden", app.state.network.mode !== "manual");
     $("manualProxy").value = app.state.network.proxyUrl || "";
     $("proxyPort").value = String(app.state.proxyPort || 8765);
+    $("listenOnAllInterfaces").checked = Boolean(app.state.listenOnAllInterfaces);
   }
   return preserveDraft;
 }
@@ -2095,6 +2099,9 @@ function renderNetwork() {
   const system = app.state.systemProxy;
   $("systemProxyState").textContent = system.enabled ? "已检测到 Windows 系统代理" : "使用 Windows 当前路由";
   $("networkNote").textContent = system.note || "";
+  $("listenScopeNote").textContent = app.state.listenOnAllInterfaces
+    ? "当前监听范围：所有网卡。WSL2 请使用 Windows 主机地址和上方端口访问。"
+    : "当前监听范围：仅 Windows 本机回环地址。";
 }
 
 async function setNetworkMode(mode) {
@@ -2355,6 +2362,29 @@ function toast(message, isError = false) {
   }, 3000);
 }
 
+async function setProxyListenAllInterfaces(enabled) {
+  const input = $("listenOnAllInterfaces");
+  const draftRevision = app.networkListenDraftRevision + 1;
+  app.networkListenDraftRevision = draftRevision;
+  app.networkListenDirty = true;
+  input.disabled = true;
+  try {
+    await SetProxyListenAllInterfaces(enabled);
+    if (draftRevision === app.networkDraftRevision) app.networkListenDirty = false;
+    await loadState();
+    toast(enabled ? "已允许 WSL2 访问" : "已恢复仅本机访问");
+  } catch (error) {
+    if (draftRevision === app.networkDraftRevision) {
+      app.networkListenDirty = false;
+      input.checked = Boolean(app.state?.listenOnAllInterfaces);
+    }
+    await loadState();
+    toast(errorMessage(error), true);
+  } finally {
+    input.disabled = false;
+  }
+}
+
 function setDogeQuotaPopover(open) {
   const popover = $("dogeQuotaPopover");
   popover.classList.toggle("hidden", !open);
@@ -2484,6 +2514,7 @@ $("proxyPort").addEventListener("input", () => {
   app.networkPortDirty = true;
   app.networkDraftRevision += 1;
 });
+$("listenOnAllInterfaces").addEventListener("change", () => setProxyListenAllInterfaces($("listenOnAllInterfaces").checked));
 $("saveNetwork").addEventListener("click", () => saveNetwork());
 $("saveProxyPort").addEventListener("click", saveProxyPort);
 $("saveTaskNotification").addEventListener("click", () => saveTaskNotification());

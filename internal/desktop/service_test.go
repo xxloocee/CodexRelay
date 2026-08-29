@@ -321,6 +321,53 @@ func TestSetProxyPortUpdatesRuntimeAndPersistsConfig(t *testing.T) {
 	}
 }
 
+func TestSetProxyListenAllInterfacesUpdatesRuntimeAndPersistsConfig(t *testing.T) {
+	directory := t.TempDir()
+	configPath := filepath.Join(directory, "config.json")
+	store := config.NewStore(configPath)
+	cfg := config.Default(18765)
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	runtime := newTestRuntime(t, directory, store, cfg)
+	service := NewDesktopService(runtime)
+	stateChanges := 0
+	service.setStateChangedHandler(func() { stateChanges++ })
+
+	if err := service.SetProxyListenAllInterfaces(true); err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.State().Config.ListenOnAllInterfaces || !service.GetState().ListenOnAllInterfaces {
+		t.Fatalf("WSL2 listener setting should be enabled: config=%v state=%v", runtime.State().Config.ListenOnAllInterfaces, service.GetState().ListenOnAllInterfaces)
+	}
+	persisted, err := store.LoadOrCreate(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.ListenOnAllInterfaces {
+		t.Fatal("WSL2 listener setting was not persisted")
+	}
+	if stateChanges == 0 {
+		t.Fatal("listener setting should notify state changes")
+	}
+
+	if err := service.SetProxyListenAllInterfaces(false); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.State().Config.ListenOnAllInterfaces {
+		t.Fatal("listener setting should return to loopback")
+	}
+}
+
+func TestProxyListenAddress(t *testing.T) {
+	if got := proxyListenAddress(8765, false); got != "127.0.0.1:8765" {
+		t.Fatalf("loopback listener address = %q", got)
+	}
+	if got := proxyListenAddress(8765, true); got != "0.0.0.0:8765" {
+		t.Fatalf("all-interface listener address = %q", got)
+	}
+}
+
 func TestDogeTokenSwitchPromptUsesAvailableTokensInCurrentCategoryAndDismissesForFiveMinutes(t *testing.T) {
 	directory := t.TempDir()
 	store := config.NewStore(filepath.Join(directory, "config.json"))
@@ -369,6 +416,43 @@ func TestDogeTokenSwitchPromptUsesAvailableTokensInCurrentCategoryAndDismissesFo
 	service.switchMu.Unlock()
 	if got := service.GetState().Doge.TokenSwitch; got != nil {
 		t.Fatalf("ongoing failure should stay suppressed after five minutes, got %+v", got)
+	}
+}
+
+func TestSuccessfulRequestClearsManualPromptAndNotifies(t *testing.T) {
+	directory := t.TempDir()
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.TokenSwitch.Mode = config.TokenSwitchModePrompt
+	cfg.TokenSwitch.Trigger401 = true
+	cfg.TokenSwitch.Trigger403 = false
+	cfg.TokenSwitch.Trigger5xx = false
+	cfg.TokenSwitch.TriggerNetwork = false
+	cfg.Profiles = []config.Profile{
+		{ID: "profile-a", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "令牌 A", BaseURL: "https://a.example/v1", APIKey: "sk-a"},
+		{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "令牌 B", BaseURL: "https://b.example/v1", APIKey: "sk-b"},
+	}
+	cfg.ActiveProfiles = map[string]string{config.CategoryCodex: "profile-a"}
+	cfg.FailoverOrder = map[string][]string{config.CategoryCodex: {"profile-a", "profile-b"}}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	runtime := newTestRuntime(t, directory, store, cfg)
+	service := NewDesktopService(runtime)
+	for index := 0; index < config.DefaultAuthFailureThreshold; index++ {
+		runtime.ObserveUpstreamResult("profile-a", config.CategoryCodex, 401, false)
+	}
+	if prompt := service.GetState().Doge.TokenSwitch; prompt == nil {
+		t.Fatal("expected manual token switch prompt")
+	}
+	stateChanges := 0
+	service.setStateChangedHandler(func() { stateChanges++ })
+	runtime.ObserveUpstreamResult("profile-a", config.CategoryCodex, 200, false)
+	if stateChanges == 0 {
+		t.Fatal("successful recovery should notify the independent notification window")
+	}
+	if prompt := service.GetState().Doge.TokenSwitch; prompt != nil {
+		t.Fatalf("successful recovery should clear manual prompt, got %+v", prompt)
 	}
 }
 
@@ -541,6 +625,63 @@ func TestDogeDirectorySyncRemovesMissingProfileAndCompletesFailover(t *testing.T
 				t.Fatalf("missing-directory failover active profile = %q", active)
 			}
 		})
+	}
+}
+
+func TestDogeDirectoryRecoveryNoticeAfterAutomaticFailover(t *testing.T) {
+	directory := t.TempDir()
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.TokenSwitch.Mode = config.TokenSwitchModeAuto
+	cfg.TokenSwitch.Loop = false
+	cfg.Doge.AccessToken = "fake-doge-access-token"
+	cfg.Doge.Groups = []string{"可用分组"}
+	cfg.Doge.Tokens = []config.DogeToken{
+		{ID: 41, Status: 1, Name: "当前令牌", Category: config.CategoryCodex, Key: "sk-current", Group: "可用分组"},
+		{ID: 42, Status: 1, Name: "备用令牌", Category: config.CategoryCodex, Key: "sk-candidate", Group: "可用分组"},
+	}
+	cfg.Profiles = []config.Profile{
+		{ID: "doge-current", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "当前令牌", BaseURL: "https://example.test/v1", APIKey: "sk-current", RemoteTokenID: 41},
+		{ID: "doge-candidate", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "备用令牌", BaseURL: "https://example.test/v1", APIKey: "sk-candidate", RemoteTokenID: 42},
+	}
+	cfg.ActiveProfiles = map[string]string{config.CategoryCodex: "doge-current"}
+	cfg.FailoverOrder = map[string][]string{config.CategoryCodex: {"doge-current", "doge-candidate"}}
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{SkipConfigReplacement: true}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	runtime := newTestRuntime(t, directory, store, cfg)
+	service := NewDesktopService(runtime)
+
+	unavailable := cfg.Doge
+	unavailable.Tokens = append([]config.DogeToken(nil), cfg.Doge.Tokens...)
+	unavailable.Tokens[0].Status = 2
+	contexts := buildDogeDirectorySwitchContexts(cfg, unavailable)
+	if err := service.saveDogeData(unavailable, dogeAnnouncementSnapshot{}, defaultDogeBaseURL, cfg.Doge.AccessToken, cfg.Doge.TokenOrder); err != nil {
+		t.Fatal(err)
+	}
+	service.setDogeDirectorySwitchContexts(contexts)
+	if active := runtime.State().Config.ActiveProfiles[config.CategoryCodex]; active != "doge-candidate" {
+		t.Fatalf("automatic failover active profile = %q", active)
+	}
+
+	recovered := runtime.State().Config.Doge
+	recovered.Tokens = append([]config.DogeToken(nil), unavailable.Tokens...)
+	recovered.Tokens[0].Status = 1
+	contexts = buildDogeDirectorySwitchContexts(runtime.State().Config, recovered)
+	if len(contexts) != 0 {
+		t.Fatalf("recovered directory should not create an active failure context: %+v", contexts)
+	}
+	if err := service.saveDogeData(recovered, dogeAnnouncementSnapshot{}, defaultDogeBaseURL, cfg.Doge.AccessToken, cfg.Doge.TokenOrder); err != nil {
+		t.Fatal(err)
+	}
+	service.setDogeDirectorySwitchContexts(contexts)
+	notice := service.GetState().Doge.TokenSwitches[config.CategoryCodex]
+	if notice == nil || notice.FailureKind != "directory_recovered" || notice.CurrentProfileID != "doge-candidate" {
+		t.Fatalf("recovery notice after automatic failover = %+v", notice)
+	}
+	if len(notice.Candidates) != 1 || notice.Candidates[0].ProfileID != "doge-current" {
+		t.Fatalf("recovered token candidate = %+v", notice.Candidates)
 	}
 }
 

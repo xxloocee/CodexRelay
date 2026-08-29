@@ -340,6 +340,16 @@ export function SetProfileAutoSwitch(id, enabled) {
 }
 
 /**
+ * SetProxyListenAllInterfaces 切换透明代理是否监听所有 IPv4 网卡；绑定失败时保留原配置和监听。
+ * 开启后 WSL2 可通过 Windows 主机地址访问，但所有请求仍须通过本地访问令牌认证。
+ * @param {boolean} enabled
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetProxyListenAllInterfaces(enabled) {
+    return $Call.ByID(4273331261, enabled);
+}
+
+/**
  * SetProxyPort 校验并热切换本地代理监听端口；新端口无法绑定时不修改配置和现有监听。
  * 端口范围为 TCP 的 1-65535；成功后新请求地址立即使用新端口，已有连接由旧服务优雅退出。
  * @param {number} port

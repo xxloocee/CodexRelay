@@ -36,7 +36,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-var applicationVersion = "2.0.0"
+var applicationVersion = "2.1.1"
 
 const (
 	NotificationKindBalance      = "balance"
@@ -47,27 +47,29 @@ const (
 )
 
 type DesktopState struct {
-	Version          string                     `json:"version"`
-	UpdateSupported  bool                       `json:"updateSupported"`
-	NeedsOnboarding  bool                       `json:"needsOnboarding"`
-	DataDirectory    string                     `json:"dataDirectory"`
-	ProxyPort        int                        `json:"proxyPort"`
-	ProxyURL         string                     `json:"proxyUrl"`
-	ProxyURLs        map[string]string          `json:"proxyUrls"`
-	LocalAccessToken string                     `json:"localAccessToken"`
-	ActiveProfiles   map[string]string          `json:"activeProfiles"`
-	Profiles         []PublicProfile            `json:"profiles"`
-	FailoverOrder    map[string][]string        `json:"failoverOrder"`
-	ClientConfigs    []PublicClientConfig       `json:"clientConfigs"`
-	Network          network.Settings           `json:"network"`
-	SystemProxy      network.SystemProxyInfo    `json:"systemProxy"`
-	Requests         []usage.RequestRecord      `json:"requests"`
-	Usage            usage.Overview             `json:"usage"`
-	UptimeSeconds    int64                      `json:"uptimeSeconds"`
-	Preferences      config.Preferences         `json:"preferences"`
-	TokenSwitch      config.TokenSwitchSettings `json:"tokenSwitch"`
-	TaskNotification TaskNotificationState      `json:"taskNotification"`
-	Doge             DogeState                  `json:"doge"`
+	Version         string `json:"version"`
+	UpdateSupported bool   `json:"updateSupported"`
+	NeedsOnboarding bool   `json:"needsOnboarding"`
+	DataDirectory   string `json:"dataDirectory"`
+	ProxyPort       int    `json:"proxyPort"`
+	// ListenOnAllInterfaces 是网络设置页展示的监听范围，不代表当前出站网络出口。
+	ListenOnAllInterfaces bool                       `json:"listenOnAllInterfaces"`
+	ProxyURL              string                     `json:"proxyUrl"`
+	ProxyURLs             map[string]string          `json:"proxyUrls"`
+	LocalAccessToken      string                     `json:"localAccessToken"`
+	ActiveProfiles        map[string]string          `json:"activeProfiles"`
+	Profiles              []PublicProfile            `json:"profiles"`
+	FailoverOrder         map[string][]string        `json:"failoverOrder"`
+	ClientConfigs         []PublicClientConfig       `json:"clientConfigs"`
+	Network               network.Settings           `json:"network"`
+	SystemProxy           network.SystemProxyInfo    `json:"systemProxy"`
+	Requests              []usage.RequestRecord      `json:"requests"`
+	Usage                 usage.Overview             `json:"usage"`
+	UptimeSeconds         int64                      `json:"uptimeSeconds"`
+	Preferences           config.Preferences         `json:"preferences"`
+	TokenSwitch           config.TokenSwitchSettings `json:"tokenSwitch"`
+	TaskNotification      TaskNotificationState      `json:"taskNotification"`
+	Doge                  DogeState                  `json:"doge"`
 }
 
 // TaskNotificationState 是消息通知设置和后台队列的公开快照。通知 URL 仅在投递时
@@ -475,6 +477,63 @@ func (s *DesktopService) updateConfig(mutator func(*config.AppConfig) error) err
 	return err
 }
 
+// proxyListenAddress 返回透明代理的本地监听地址；默认只接受 Windows 本机回环请求，
+// 开启 WSL2 访问后改为监听所有 IPv4 网卡。监听范围不改变本地访问令牌校验。
+func proxyListenAddress(port int, listenOnAllInterfaces bool) string {
+	host := "127.0.0.1"
+	if listenOnAllInterfaces {
+		host = "0.0.0.0"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func (s *DesktopService) prepareProxyListener(port int, listenOnAllInterfaces bool) (net.Listener, *http.Server, error) {
+	address := proxyListenAddress(port, listenOnAllInterfaces)
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, nil, fmt.Errorf("代理端口 %s 无法监听，可能已有实例正在运行: %w", address, err)
+	}
+	server := &http.Server{
+		Handler: s.runtime.ProxyHandler(), ReadHeaderTimeout: 15 * time.Second,
+		IdleTimeout: 120 * time.Second,
+	}
+	return listener, server, nil
+}
+
+func (s *DesktopService) serveProxy(server *http.Server, listener net.Listener) {
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			application.Get().Logger.Error("透明代理异常退出", "error", err)
+		}
+	}()
+}
+
+// installProxyListener 替换当前监听；调用方须先完成新监听绑定和配置持久化。
+// 新监听启动后旧服务再优雅退出，避免改端口时出现不必要的代理空窗。
+func (s *DesktopService) installProxyListener(server *http.Server, listener net.Listener) bool {
+	s.mu.Lock()
+	oldServer := s.server
+	oldListener := s.listener
+	if oldServer == nil && oldListener == nil {
+		s.mu.Unlock()
+		return false
+	}
+	s.server = server
+	s.listener = listener
+	s.mu.Unlock()
+	s.serveProxy(server, listener)
+	if oldServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := oldServer.Shutdown(ctx); err != nil {
+			application.Get().Logger.Error("旧监听端口关闭失败", "error", err)
+		}
+		cancel()
+	} else if oldListener != nil {
+		_ = oldListener.Close()
+	}
+	return true
+}
+
 func (s *DesktopService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	state := s.runtime.State()
 	if state == nil {
@@ -484,24 +543,15 @@ func (s *DesktopService) ServiceStartup(_ context.Context, _ application.Service
 	if err := s.scanClientConfigs(); err != nil {
 		application.Get().Logger.Warn("扫描外部客户端配置目录失败", "error", err)
 	}
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(state.Config.ProxyPort))
-	listener, err := net.Listen("tcp", address)
+	listener, server, err := s.prepareProxyListener(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces)
 	if err != nil {
-		return fmt.Errorf("代理端口 %s 无法监听，可能已有实例正在运行: %w", address, err)
-	}
-	server := &http.Server{
-		Handler: s.runtime.ProxyHandler(), ReadHeaderTimeout: 15 * time.Second,
-		IdleTimeout: 120 * time.Second,
+		return err
 	}
 	s.mu.Lock()
 	s.listener = listener
 	s.server = server
 	s.mu.Unlock()
-	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			application.Get().Logger.Error("透明代理异常退出", "error", err)
-		}
-	}()
+	s.serveProxy(server, listener)
 	s.mu.Lock()
 	if !s.taskNotifyStarted {
 		s.taskNotifyStarted = true
@@ -638,7 +688,7 @@ func (s *DesktopService) GetState() DesktopState {
 		dogeState.LastSyncAt = state.Config.Doge.LastSyncAt.Format(time.RFC3339)
 	}
 	return DesktopState{
-		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ProxyPort: state.Config.ProxyPort,
+		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ProxyPort: state.Config.ProxyPort, ListenOnAllInterfaces: state.Config.ListenOnAllInterfaces,
 		ProxyURL: proxyURLs[config.CategoryCodex], ProxyURLs: proxyURLs,
 		LocalAccessToken: state.Config.LocalAccessToken, ActiveProfiles: state.Config.ActiveProfiles,
 		Profiles: profiles, FailoverOrder: config.NormalizeFailoverOrder(state.Config.FailoverOrder, state.Config.Profiles), ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,
@@ -723,7 +773,7 @@ func (s *DesktopService) enqueueTokenRequestFailureNotifications() {
 	}
 }
 
-// handleUpstreamResult 在当前活动令牌真正成功后结束该类别的故障轮次。
+// handleUpstreamResult 在当前活动令牌真正成功后结束该类别的故障轮次，并刷新已显示的手动故障提示。
 // 自动切换成功后的通知继续保留到用户确认；这里只清理尝试集合，使后续新故障可以开始新一轮。
 func (s *DesktopService) handleUpstreamResult(profileID, category string, status int, transportError bool) {
 	if transportError || status >= 400 || profileID == "" || category == "" {
@@ -734,17 +784,20 @@ func (s *DesktopService) handleUpstreamResult(profileID, category string, status
 		return
 	}
 	s.switchMu.Lock()
-	_, cleared := s.switchRounds[category]
-	if cleared {
-		delete(s.switchRounds, category)
-		for key := range s.switchPrompts {
-			if strings.HasPrefix(key, profileID+"|") {
-				delete(s.switchPrompts, key)
-			}
+	_, clearedRound := s.switchRounds[category]
+	clearedPrompt := false
+	for key := range s.switchPrompts {
+		if strings.HasPrefix(key, profileID+"|") {
+			delete(s.switchPrompts, key)
+			clearedPrompt = true
 		}
 	}
+	if clearedRound {
+		delete(s.switchRounds, category)
+	}
 	s.switchMu.Unlock()
-	if cleared {
+	// 手动模式没有 switchRounds；仍须在成功响应清掉已显示的故障提示并刷新独立窗口。
+	if clearedRound || clearedPrompt {
 		s.notifyStateChanged()
 	}
 }
@@ -929,11 +982,9 @@ func promptFailureWindow(prompt *PublicDogeTokenSwitchPrompt) int {
 func (s *DesktopService) clearSwitchPrompt(key string) {
 	s.switchMu.Lock()
 	delete(s.switchPrompts, key)
-	for category, context := range s.directorySwitches {
-		if context != nil && context.key == key {
-			delete(s.directorySwitches, category)
-		}
-	}
+	// 目录失效快照不能在切换成功后立即删除：下一次同步需要用它对比旧状态，
+	// 才能在令牌状态或分组恢复时生成独立提醒。setDogeDirectorySwitchContexts
+	// 会在下一次同步中按最新目录替换或清理该快照。
 	for category, notice := range s.directoryRecoveryNotices {
 		if notice != nil && notice.Key == key {
 			delete(s.directoryRecoveryNotices, category)
@@ -1250,12 +1301,20 @@ func buildDogeDirectoryRecoveryNotice(cfg config.AppConfig, previous *tokenSwitc
 	if previous == nil {
 		return nil
 	}
-	current := dogeTokenForProfile(cfg, previous.profile)
-	currentName := strings.TrimSpace(previous.profile.Name)
+	// 令牌失效期间自动切换可能已经改写 ActiveProfiles；恢复提示必须以此刻实际活动项作为
+	// 当前 Profile，恢复的令牌才会进入候选列表，SwitchToken 的并发状态校验也才能成立。
+	currentProfile := previous.profile
+	if activeID := strings.TrimSpace(cfg.ActiveProfiles[previous.profile.Category]); activeID != "" {
+		if index := config.FindProfileIndex(cfg.Profiles, activeID); index >= 0 && cfg.Profiles[index].Category == previous.profile.Category {
+			currentProfile = cfg.Profiles[index]
+		}
+	}
+	current := dogeTokenForProfile(cfg, currentProfile)
+	currentName := strings.TrimSpace(currentProfile.Name)
 	if currentName == "" {
 		currentName = current.Name
 	}
-	currentName = formatNonHomeProfileName(currentName, previous.profile.Source, dogeTokenDisplayGroup(current), current.GroupRatio)
+	currentName = formatNonHomeProfileName(currentName, currentProfile.Source, dogeTokenDisplayGroup(current), current.GroupRatio)
 	if currentName == "" {
 		currentName = "当前令牌"
 	}
@@ -1276,9 +1335,9 @@ func buildDogeDirectoryRecoveryNotice(cfg config.AppConfig, previous *tokenSwitc
 	message := fmt.Sprintf("Codex类别（%s）下%s令牌已恢复可用。", categoryDisplayName(previous.profile.Category), strings.Join(names, "、"))
 	return &PublicDogeTokenSwitchPrompt{
 		Key: previous.key + "|recovered", Category: previous.profile.Category, Mode: "manual", FailureKind: "directory_recovered",
-		CurrentTokenID: previous.profile.RemoteTokenID, CurrentProfileID: previous.profile.ID, CurrentName: currentName,
+		CurrentTokenID: currentProfile.RemoteTokenID, CurrentProfileID: currentProfile.ID, CurrentName: currentName,
 		CurrentGroup: dogeTokenDisplayGroup(current), CurrentRatio: current.GroupRatio, Message: message,
-		Candidates: publicDogeTokenSwitchCandidates(cfg, candidates, previous.profile.ID),
+		Candidates: publicDogeTokenSwitchCandidates(cfg, candidates, currentProfile.ID),
 	}
 }
 
@@ -1342,7 +1401,9 @@ func (s *DesktopService) setDogeDirectorySwitchContexts(contexts map[string]*tok
 			if previous == nil || previous.directoryReason != dogeDirectoryFailureUnavailable || contexts[category] != nil {
 				continue
 			}
-			if state.Config.ActiveProfiles[category] != previous.profile.ID || config.FindProfileIndex(state.Config.Profiles, previous.profile.ID) < 0 {
+			activeID := strings.TrimSpace(state.Config.ActiveProfiles[category])
+			activeIndex := config.FindProfileIndex(state.Config.Profiles, activeID)
+			if activeID == "" || activeIndex < 0 || state.Config.Profiles[activeIndex].Category != category || config.FindProfileIndex(state.Config.Profiles, previous.profile.ID) < 0 {
 				continue
 			}
 			recoveredTokens := recoveredDogeTokens(previous, state.Config)
@@ -2436,14 +2497,9 @@ func (s *DesktopService) SetProxyPort(port int) error {
 	if state.Config.ProxyPort == port {
 		return nil
 	}
-	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
-	listener, err := net.Listen("tcp", address)
+	listener, server, err := s.prepareProxyListener(port, state.Config.ListenOnAllInterfaces)
 	if err != nil {
-		return fmt.Errorf("代理端口 %s 无法监听，可能已被其他程序占用: %w", address, err)
-	}
-	server := &http.Server{
-		Handler: s.runtime.ProxyHandler(), ReadHeaderTimeout: 15 * time.Second,
-		IdleTimeout: 120 * time.Second,
+		return err
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		cfg.ProxyPort = port
@@ -2452,30 +2508,36 @@ func (s *DesktopService) SetProxyPort(port int) error {
 		_ = listener.Close()
 		return err
 	}
-	s.mu.Lock()
-	oldServer := s.server
-	oldListener := s.listener
-	if oldServer == nil && oldListener == nil {
-		s.mu.Unlock()
+	if !s.installProxyListener(server, listener) {
 		_ = listener.Close()
 		return nil
 	}
-	s.server = server
-	s.listener = listener
-	s.mu.Unlock()
-	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			application.Get().Logger.Error("透明代理异常退出", "error", err)
-		}
-	}()
-	if oldServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := oldServer.Shutdown(ctx); err != nil {
-			application.Get().Logger.Error("旧监听端口关闭失败", "error", err)
-		}
-		cancel()
-	} else if oldListener != nil {
-		_ = oldListener.Close()
+	return nil
+}
+
+// SetProxyListenAllInterfaces 切换透明代理是否监听所有 IPv4 网卡；绑定失败时保留原配置和监听。
+// 开启后 WSL2 可通过 Windows 主机地址访问，但所有请求仍须通过本地访问令牌认证。
+func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("代理尚未初始化")
+	}
+	if state.Config.ListenOnAllInterfaces == enabled {
+		return nil
+	}
+	listener, server, err := s.prepareProxyListener(state.Config.ProxyPort, enabled)
+	if err != nil {
+		return err
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		cfg.ListenOnAllInterfaces = enabled
+		return nil
+	}); err != nil {
+		_ = listener.Close()
+		return err
+	}
+	if !s.installProxyListener(server, listener) {
+		_ = listener.Close()
 	}
 	return nil
 }

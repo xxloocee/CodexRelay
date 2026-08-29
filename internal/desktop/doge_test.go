@@ -261,6 +261,13 @@ func TestDogeDirectoryRecoveryNoticeListsRecoveredTokensAndCandidates(t *testing
 	if len(notice.Candidates) != 1 || notice.Candidates[0].ProfileID != "profile-42" {
 		t.Fatalf("recovery candidates = %+v", notice.Candidates)
 	}
+	// 自动切换可能已将活动项改为 profile-42；恢复提示仍须把已恢复的 profile-41
+	// 作为可提交候选，否则弹窗即使显示也会因当前项校验失败而无法切换回来。
+	cfg.ActiveProfiles[config.CategoryCodex] = "profile-42"
+	notice = buildDogeDirectoryRecoveryNotice(cfg, previous, recovered, availableFailoverProfiles(cfg, config.CategoryCodex))
+	if notice == nil || notice.CurrentProfileID != "profile-42" || len(notice.Candidates) != 1 || notice.Candidates[0].ProfileID != "profile-41" {
+		t.Fatalf("recovery notice after automatic failover = %+v", notice)
+	}
 }
 
 func TestParseDogeGroupsKeepsRawKeysForMatchingAndOnlyDisplayNameForUI(t *testing.T) {
