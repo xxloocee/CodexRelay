@@ -231,6 +231,7 @@ type DogeAlertSettings struct {
 }
 
 type DogeConnection struct {
+	// BaseURL 同时用于二狗子账户、目录、套餐同步和令牌实际代理请求。
 	BaseURL             string                `json:"baseUrl"`
 	AccessToken         string                `json:"accessToken,omitempty"`
 	SyncIntervalMinutes int                   `json:"syncIntervalMinutes"`

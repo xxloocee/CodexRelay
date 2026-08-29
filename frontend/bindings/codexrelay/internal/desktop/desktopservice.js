@@ -296,6 +296,16 @@ export function SetDogeAlertSettings(input) {
 }
 
 /**
+ * SetDogeBaseURL 保存二狗子管理 API 的服务地址。仍跟随旧默认地址的二狗子
+ * Profile 会一起切换；用户在编辑页改过地址的 Profile 不会被覆盖。
+ * @param {string} raw
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetDogeBaseURL(raw) {
+    return $Call.ByID(3819351772, raw);
+}
+
+/**
  * @param {number} minutes
  * @returns {$CancellablePromise<void>}
  */

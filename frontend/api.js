@@ -34,6 +34,7 @@ export {
   SaveProfile,
   SetDogeTokenCategories,
   SetDogeAlertSettings,
+  SetDogeBaseURL,
   SetClientConfigPath,
   SetClientConfigSkip,
   SetDataDirectory,

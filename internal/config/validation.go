@@ -208,12 +208,8 @@ func ValidatePreferences(preferences Preferences) error {
 }
 
 func ValidateDoge(connection DogeConnection) error {
-	if strings.TrimSpace(connection.BaseURL) == "" {
-		return errors.New("二狗子 API 地址不能为空")
-	}
-	u, err := url.Parse(strings.TrimSpace(connection.BaseURL))
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
-		return errors.New("二狗子 API 地址必须是有效的 http:// 或 https:// 地址")
+	if _, err := NormalizeDogeBaseURL(connection.BaseURL); err != nil {
+		return err
 	}
 	if !IsDogeSyncInterval(connection.SyncIntervalMinutes) {
 		return errors.New("二狗子同步间隔必须是 1、3、5、10、15、30 或 60 分钟")
@@ -249,6 +245,20 @@ func ValidateDoge(connection DogeConnection) error {
 		orderKeys[key] = struct{}{}
 	}
 	return nil
+}
+
+// NormalizeDogeBaseURL 校验并规范化二狗子服务地址。地址由用户提供时去掉
+// 首尾空白和末尾斜杠，避免后续拼接管理 API 路径或新导入 Profile 时产生双斜杠。
+func NormalizeDogeBaseURL(raw string) (string, error) {
+	baseURL := strings.TrimSpace(raw)
+	if baseURL == "" {
+		return "", errors.New("二狗子 API 地址不能为空")
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return "", errors.New("二狗子 API 地址必须是有效的 http:// 或 https:// 地址")
+	}
+	return strings.TrimRight(baseURL, "/"), nil
 }
 
 func ValidateProfile(profile Profile) error {

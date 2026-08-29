@@ -36,6 +36,7 @@ import {
   SetNetwork,
   SetTaskNotification,
   SetDogeSyncInterval,
+  SetDogeBaseURL,
   SetTokenSwitchSettings,
   SetDogeAlertSettings,
   SetProxyListenAllInterfaces,
@@ -84,6 +85,7 @@ const app = {
   tokenSwitchDraftRevision: 0,
   dogeAlertDirty: false,
   dogeAlertDraftRevision: 0,
+  dogeBaseURLDirty: false,
   networkModeDirty: false,
   networkProxyDirty: false,
   networkPortDirty: false,
@@ -2161,6 +2163,28 @@ async function saveProxyPort() {
   }
 }
 
+async function saveDogeBaseURL() {
+  const input = $("dogeBaseURL");
+  const baseURL = input.value.trim();
+  if (!baseURL) {
+    toast("二狗子 API 地址不能为空", true);
+    input.focus();
+    return;
+  }
+  const button = $("saveDogeBaseURL");
+  setButtonLoading(button, true, "保存中...");
+  try {
+    await SetDogeBaseURL(baseURL);
+    app.dogeBaseURLDirty = false;
+    await loadState();
+    toast("二狗子 API 地址已更新；已绑定账户请手动刷新一次");
+  } catch (error) {
+    toast(errorMessage(error), true);
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
 function renderConnection() {
   const doge = app.state.doge || {};
   const bound = Boolean(doge.bound);
@@ -2170,6 +2194,7 @@ function renderConnection() {
   const account = doge.account || {};
   const accountUnavailable = Boolean(syncError && !doge.lastSyncAt);
   const accountValue = (value, fallback = "-") => syncing ? "同步中..." : (accountUnavailable ? "同步失败" : (value || fallback));
+  if (!app.dogeBaseURLDirty) $("dogeBaseURL").value = doge.baseUrl || "";
   $("connectionPanel").classList.toggle("doge-is-bound", bound);
   $("dogeUnboundView").classList.toggle("hidden", bound);
   $("dogeAccessToken").value = bound ? "" : $("dogeAccessToken").value;
@@ -2193,6 +2218,11 @@ function renderConnection() {
   setLoadingText($("dogeAccountState"), syncing, syncing ? "同步中... 请稍候" : (syncError ? "账户数据同步失败，当前显示缓存" : "账户信息来自最近一次同步"));
   $("dogeSyncRow").classList.toggle("hidden", !bound);
   $("dogeSyncInterval").value = String(doge.syncIntervalMinutes || 3);
+  const syncButton = $("syncDogeSettings");
+  if (syncButton && syncButton.dataset.loading !== "true") {
+    syncButton.disabled = !bound || syncing;
+    syncButton.setAttribute("aria-label", syncing ? "二狗子信息同步中" : "手动同步二狗子信息");
+  }
   $("dogeSyncError").textContent = !syncing && doge.lastSyncError ? "同步失败：" + doge.lastSyncError : "";
   $("dogeSyncError").classList.toggle("hidden", syncing || !doge.lastSyncError);
 }
@@ -2417,8 +2447,8 @@ $("submitDogeTopup").addEventListener("click", redeemDoge);
 $("clientSetupSkip").addEventListener("click", () => resolveClientSetup(false));
 $("clientSetupConfigure").addEventListener("click", () => resolveClientSetup(true));
 $("closeClientSetupModal").addEventListener("click", closeClientSetupModal);
-$("refreshDoge").addEventListener("click", async () => {
-  const button = $("refreshDoge");
+async function syncDogeNow(button) {
+  if (app.localDogeSyncing || app.state?.doge?.syncing) return;
   setButtonLoading(button, true);
   app.localDogeSyncing = true;
   app.dogeRemoteSyncing = false;
@@ -2441,7 +2471,9 @@ $("refreshDoge").addEventListener("click", async () => {
     if (synced) openDogeCategoryDialog(true);
     setButtonLoading(button, false);
   }
-});
+}
+$("refreshDoge").addEventListener("click", () => syncDogeNow($("refreshDoge")));
+$("syncDogeSettings").addEventListener("click", (event) => syncDogeNow(event.currentTarget));
 document.querySelectorAll(".filter-option").forEach((button) => button.addEventListener("click", () => setFilter(button.closest(".filter-options").dataset.filterGroup, button.dataset.filterValue)));
 $("openSettings").addEventListener("click", () => openSettings());
 $("pendingDogeImport").addEventListener("click", () => openDogeCategoryDialog(true));
@@ -2522,6 +2554,8 @@ $("testTaskNotification").addEventListener("click", testTaskNotification);
 for (const id of ["taskNotificationEnabled", "taskNotificationWebhookUrl", "taskNotificationIdleGraceSeconds", "taskNotificationRequestTimeoutSeconds", "taskNotificationMaxAttempts", ...Object.values(taskNotificationEventInputs)]) $(id).addEventListener("input", markTaskNotificationDirty);
 $("taskNotificationEnabled").addEventListener("change", markTaskNotificationDirty);
 for (const id of Object.values(taskNotificationEventInputs)) $(id).addEventListener("change", markTaskNotificationDirty);
+$("dogeBaseURL").addEventListener("input", () => { app.dogeBaseURLDirty = true; });
+$("saveDogeBaseURL").addEventListener("click", saveDogeBaseURL);
 $("dogeConnectionAction").addEventListener("click", async () => {
   const doge = app.state?.doge || {};
   const button = $("dogeConnectionAction");

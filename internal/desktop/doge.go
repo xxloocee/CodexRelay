@@ -46,6 +46,25 @@ type dogeEnvelope struct {
 	Success bool            `json:"success"`
 }
 
+// dogeHTTPError 保留上游 HTTP 状态，允许兼容接口缺少可选管理能力时继续同步。
+// Error 文案保持原有格式，避免用户看到内部错误类型变化。
+type dogeHTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *dogeHTTPError) Error() string {
+	if strings.TrimSpace(e.Message) == "" {
+		return fmt.Sprintf("二狗子请求返回 HTTP %d", e.StatusCode)
+	}
+	return fmt.Sprintf("二狗子请求失败（HTTP %d）: %s", e.StatusCode, e.Message)
+}
+
+func isDogeNotFound(err error) bool {
+	var statusError *dogeHTTPError
+	return errors.As(err, &statusError) && statusError.StatusCode == http.StatusNotFound
+}
+
 type dogeStatusResponse struct {
 	AnnouncementsEnabled bool                      `json:"announcements_enabled"`
 	Announcements        []config.DogeAnnouncement `json:"announcements"`
@@ -275,9 +294,46 @@ func (s *DesktopService) SetDogeSyncInterval(minutes int) error {
 	})
 }
 
+// SetDogeBaseURL 保存二狗子管理 API 的服务地址。仍跟随旧默认地址的二狗子
+// Profile 会一起切换；用户在编辑页改过地址的 Profile 不会被覆盖。
+func (s *DesktopService) SetDogeBaseURL(raw string) error {
+	baseURL, err := config.NormalizeDogeBaseURL(raw)
+	if err != nil {
+		return err
+	}
+	s.dogeMu.Lock()
+	defer s.dogeMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	previousBaseURL := strings.TrimRight(strings.TrimSpace(state.Config.Doge.BaseURL), "/")
+	if previousBaseURL == baseURL {
+		return nil
+	}
+	return s.updateConfig(func(cfg *config.AppConfig) error {
+		oldBaseURL := strings.TrimRight(strings.TrimSpace(cfg.Doge.BaseURL), "/")
+		oldProfileURL := oldBaseURL + "/v1"
+		newProfileURL := baseURL + "/v1"
+		for index := range cfg.Profiles {
+			profile := &cfg.Profiles[index]
+			if profile.Source != config.SourceDoge {
+				continue
+			}
+			if strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/") == oldProfileURL {
+				profile.BaseURL = newProfileURL
+			}
+		}
+		cfg.Doge.BaseURL = baseURL
+		return nil
+	})
+}
+
 // UnbindDoge 删除绑定凭据、账户快照和全部二狗子 Profile。
 // Profile、启用映射、故障顺序及对应运行时提示在返回前一并清理，自定义 API 和公告记录不受影响。
 func (s *DesktopService) UnbindDoge() error {
+	s.dogeMu.Lock()
+	defer s.dogeMu.Unlock()
 	removedProfileIDs := make([]string, 0)
 	affectedCategories := make(map[string]struct{})
 	_, err := s.runtime.UpdateConfig(func(cfg *config.AppConfig) error {
@@ -1311,6 +1367,10 @@ func (s *DesktopService) fetchDogeAnnouncements(ctx context.Context, client *htt
 		var err error
 		statusData, err = s.dogeRequestWithClient(ctx, client, baseURL, "", http.MethodGet, "/api/status")
 		if err != nil {
+			if isDogeNotFound(err) {
+				statusData = []byte(`{}`)
+				return
+			}
 			errorsCh <- fmt.Errorf("二狗子公告状态请求失败: %w", err)
 		}
 	}()
@@ -1319,6 +1379,10 @@ func (s *DesktopService) fetchDogeAnnouncements(ctx context.Context, client *htt
 		var err error
 		noticeData, err = s.dogeRequestWithClient(ctx, client, baseURL, "", http.MethodGet, "/api/notice")
 		if err != nil {
+			if isDogeNotFound(err) {
+				noticeData = []byte("null")
+				return
+			}
 			errorsCh <- fmt.Errorf("二狗子当前公告请求失败: %w", err)
 		}
 	}()
@@ -1359,6 +1423,9 @@ func (s *DesktopService) fetchDogeUser(ctx context.Context, client *http.Client,
 func (s *DesktopService) fetchDogeSubscriptions(ctx context.Context, client *http.Client, baseURL, accessToken string) ([]config.DogeSubscription, error) {
 	data, err := s.dogeRequestWithClient(ctx, client, baseURL, accessToken, http.MethodGet, "/api/subscription/self")
 	if err != nil {
+		if isDogeNotFound(err) {
+			return []config.DogeSubscription{}, nil
+		}
 		return nil, err
 	}
 	var payload dogeSubscriptionResponse
@@ -1375,6 +1442,9 @@ func (s *DesktopService) fetchDogeSubscriptions(ctx context.Context, client *htt
 func (s *DesktopService) fetchDogeTopupInfo(ctx context.Context, client *http.Client, baseURL, accessToken string) (config.DogeTopupInfo, error) {
 	data, err := s.dogeRequestWithClient(ctx, client, baseURL, accessToken, http.MethodGet, "/api/user/topup/info")
 	if err != nil {
+		if isDogeNotFound(err) {
+			return config.DogeTopupInfo{}, nil
+		}
 		return config.DogeTopupInfo{}, err
 	}
 	var payload dogeTopupInfoResponse
@@ -1711,7 +1781,7 @@ func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *
 	var envelope dogeEnvelope
 	if decodeErr := json.Unmarshal(responseBody, &envelope); decodeErr != nil {
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, fmt.Errorf("二狗子请求返回 HTTP %d", response.StatusCode)
+			return nil, &dogeHTTPError{StatusCode: response.StatusCode}
 		}
 		return nil, fmt.Errorf("二狗子响应格式无效: %w", decodeErr)
 	}
@@ -1726,7 +1796,7 @@ func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *
 		if sensitive != "" {
 			message = strings.ReplaceAll(message, sensitive, "[已隐藏]")
 		}
-		return nil, fmt.Errorf("二狗子请求失败（HTTP %d）: %s", response.StatusCode, message)
+		return nil, &dogeHTTPError{StatusCode: response.StatusCode, Message: message}
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return []byte("null"), nil

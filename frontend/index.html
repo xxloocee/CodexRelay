@@ -256,6 +256,11 @@
               <div class="doge-logo-frame"><img src="/logo.png" alt="二狗子 API"></div>
               <div class="doge-connection-title"><span class="panel-kicker">服务连接</span><h2>二狗子 API</h2><p id="dogeConnectionState" class="doge-connection-state">未绑定</p></div>
             </header>
+            <label class="doge-base-url-field">
+              <span>服务地址</span>
+              <span class="doge-base-url-control"><input id="dogeBaseURL" type="url" autocomplete="off" placeholder="https://api.ergouzi.life" required><button id="saveDogeBaseURL" class="secondary-button compact-button" type="button"><span class="icon icon-save" aria-hidden="true"></span><span data-button-label>保存地址</span></button></span>
+              <small>用于绑定、同步和新导入的二狗子代理 API；已手动修改的代理地址不会被覆盖。</small>
+            </label>
             <section id="dogeUnboundView" class="doge-state-view">
               <label class="doge-token-field"><span>API 密钥</span><input id="dogeAccessToken" type="text" autocomplete="off" placeholder="填写二狗子 User 权限令牌"></label>
             </section>
@@ -271,7 +276,7 @@
               <p id="dogeAccountState" class="doge-account-state"></p>
             </section>
             <button id="dogeConnectionAction" class="primary-button doge-action-button" type="button"><span class="icon icon-check" aria-hidden="true"></span><span data-doge-action-label>验证并绑定</span></button>
-            <div id="dogeSyncRow" class="doge-sync-row hidden"><div><strong>自动同步</strong><span>保持连接状态最新</span></div><select id="dogeSyncInterval" class="sync-select" aria-label="自动同步间隔"><option value="1">每 1 分钟</option><option value="3">每 3 分钟</option><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每 1 小时</option></select></div>
+            <div id="dogeSyncRow" class="doge-sync-row hidden"><div><strong>自动同步</strong><span>保持连接状态最新</span></div><div class="doge-sync-controls"><select id="dogeSyncInterval" class="sync-select" aria-label="自动同步间隔"><option value="1">每 1 分钟</option><option value="3">每 3 分钟</option><option value="5">每 5 分钟</option><option value="10">每 10 分钟</option><option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每 1 小时</option></select><button id="syncDogeSettings" class="secondary-button compact-button" type="button"><span class="icon icon-refresh" aria-hidden="true"></span><span data-button-label>手动同步</span></button></div></div>
             <p id="dogeSyncError" class="doge-sync-error"></p>
           </div>
         </div>

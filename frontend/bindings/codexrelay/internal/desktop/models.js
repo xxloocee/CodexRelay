@@ -65,6 +65,7 @@ export class DesktopState {
         }
         if (!("listenOnAllInterfaces" in $$source)) {
             /**
+             * ListenOnAllInterfaces 是网络设置页展示的监听范围，不代表当前出站网络出口。
              * @member
              * @type {boolean}
              */
