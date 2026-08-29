@@ -144,7 +144,12 @@ func (p *gitHubReleaseProvider) Download(
 
 func (p *gitHubReleaseProvider) latestTag(ctx context.Context) (string, error) {
 	latestURL := fmt.Sprintf("%s/%s/releases/latest", gitHubWebBaseURL, p.repository)
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, nil)
+	// GitHub's /releases/latest endpoint redirects to the concrete tag. Some
+	// HTTP/2 paths and intermediaries intermittently terminate redirected HEAD
+	// requests with EOF, while the equivalent GET request is handled reliably.
+	// The response body is not needed; we only use the final URL after the
+	// redirect and close it below.
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, latestURL, nil)
 	if err != nil {
 		return "", err
 	}
