@@ -313,17 +313,19 @@ func NormalizeTaskNotification(notification TaskNotification) TaskNotification {
 }
 
 type AppConfig struct {
-	ProxyPort        int                     `json:"proxyPort"`
-	LocalAccessToken string                  `json:"localAccessToken"`
-	ActiveProfiles   map[string]string       `json:"activeProfiles"`
-	Profiles         []Profile               `json:"profiles"`
-	FailoverOrder    map[string][]string     `json:"failoverOrder"`
-	ClientConfigs    map[string]ClientConfig `json:"clientConfigs"`
-	Network          network.Settings        `json:"network"`
-	Preferences      Preferences             `json:"preferences"`
-	TaskNotification TaskNotification        `json:"taskNotification"`
-	Doge             DogeConnection          `json:"doge"`
-	TokenSwitch      TokenSwitchSettings     `json:"tokenSwitch"`
+	ProxyPort int `json:"proxyPort"`
+	// ListenOnAllInterfaces 控制透明代理监听范围；关闭时仅接受本机回环请求，开启时监听所有 IPv4 网卡供 WSL2 访问。
+	ListenOnAllInterfaces bool                    `json:"listenOnAllInterfaces"`
+	LocalAccessToken      string                  `json:"localAccessToken"`
+	ActiveProfiles        map[string]string       `json:"activeProfiles"`
+	Profiles              []Profile               `json:"profiles"`
+	FailoverOrder         map[string][]string     `json:"failoverOrder"`
+	ClientConfigs         map[string]ClientConfig `json:"clientConfigs"`
+	Network               network.Settings        `json:"network"`
+	Preferences           Preferences             `json:"preferences"`
+	TaskNotification      TaskNotification        `json:"taskNotification"`
+	Doge                  DogeConnection          `json:"doge"`
+	TokenSwitch           TokenSwitchSettings     `json:"tokenSwitch"`
 }
 
 // DefaultTokenSwitchSettings 返回兼容当前版本行为的故障处理默认值。

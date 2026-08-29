@@ -215,6 +215,11 @@
             <div><strong>监听端口</strong><span>代理监听端口，默认 8765，保存后立即生效</span></div>
             <div class="network-port-control"><input id="proxyPort" type="number" min="1" max="65535" step="1" inputmode="numeric" aria-label="监听端口"><button id="saveProxyPort" class="primary-button" type="button"><span data-button-label>保存</span></button></div>
           </div>
+          <label class="network-listener-row network-listener-scope-row">
+            <span><strong>允许 WSL2 访问</strong><span>开启后监听所有网卡，WSL2 可通过 Windows 主机地址访问；仍需携带本地访问令牌。</span></span>
+            <input id="listenOnAllInterfaces" class="switch-input" type="checkbox" aria-label="允许 WSL2 访问">
+          </label>
+          <p id="listenScopeNote" class="network-note"></p>
         </div>
         <div id="taskNotificationPanel" class="settings-panel hidden">
           <div class="panel-heading"><div><span class="panel-kicker">Codex事件推送服务</span><h2>消息通知</h2><p class="panel-description">当满足已勾选的事件要求时，自动调用推送 URL，避免开发进度中断，长时间无人处理。</p></div></div>

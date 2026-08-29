@@ -41,6 +41,7 @@ export {
   SetNetwork,
   SetTaskNotification,
   SetDogeSyncInterval,
+  SetProxyListenAllInterfaces,
   SetProxyPort,
   SetPreferences,
   SetProfileAutoSwitch,
