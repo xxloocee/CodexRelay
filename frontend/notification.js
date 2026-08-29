@@ -8,7 +8,8 @@
  * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
  * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
-import { DismissDogeNotification, DismissDogeTokenSwitch, GetState, SwitchToken } from "./api.js";
+import { DismissDogeNotification, DismissDogeTokenSwitch, GetState, SwitchToken } from "./core/desktop-api.js";
+import { setButtonLoading } from "./core/feedback.js";
 import { renderAnnouncementMarkdown } from "./announcement-markdown.js";
 import { registerExternalLinkHandler } from "./external-links.js";
 import * as wails from "/wails/runtime.js";
@@ -25,38 +26,6 @@ registerExternalLinkHandler((error) => {
   status.textContent = message;
   status.hidden = false;
 });
-
-function setButtonLoading(button, loading, label = "") {
-  if (!button) return;
-  let iconNode = button.querySelector(".icon");
-  const labelNode = button.querySelector("[data-button-label]");
-  if (loading) {
-    if (button.dataset.loading !== "true") {
-      button.dataset.loading = "true";
-      if (!iconNode) {
-        iconNode = document.createElement("span");
-        iconNode.className = "icon icon-load spin";
-        iconNode.dataset.loadingCreated = "true";
-        button.prepend(iconNode);
-      }
-      button.dataset.loadingIcon = iconNode.className;
-      if (labelNode) button.dataset.loadingLabel = labelNode.textContent;
-    }
-    button.disabled = true;
-    iconNode = button.querySelector(".icon");
-    if (iconNode) iconNode.className = "icon icon-load spin";
-    if (labelNode && label) labelNode.textContent = label;
-    return;
-  }
-  if (button.dataset.loading !== "true") return;
-  if (iconNode?.dataset.loadingCreated === "true") iconNode.remove();
-  else if (iconNode) iconNode.className = button.dataset.loadingIcon || "icon icon-load";
-  if (labelNode) labelNode.textContent = button.dataset.loadingLabel || labelNode.textContent;
-  delete button.dataset.loading;
-  delete button.dataset.loadingIcon;
-  delete button.dataset.loadingLabel;
-  button.disabled = false;
-}
 
 function renderTokenSwitch(prompt) {
   switchPrompt = prompt || null;

@@ -83,8 +83,9 @@ CodexRelay 是使用 Go + Wails v3 开发的 Windows 桌面程序，同时运行
 ```powershell
 go test ./...
 go vet ./...
-node --check frontend\app.js
-node --check frontend\api.js
+Get-ChildItem frontend -Recurse -Filter *.js -File |
+  Where-Object { $_.FullName -notmatch '\\(bindings|vendor)\\' } |
+  ForEach-Object { node --check $_.FullName }
 .\build.ps1
 ```
 

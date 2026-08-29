@@ -51,10 +51,14 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     go vet ./...
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    node --check (Join-Path $frontendDirectory "app.js")
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    node --check (Join-Path $frontendDirectory "api.js")
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $frontendScripts = Get-ChildItem -LiteralPath $frontendDirectory -Recurse -Filter "*.js" -File | Where-Object {
+        $relativePath = [System.IO.Path]::GetRelativePath($frontendDirectory, $_.FullName)
+        $relativePath -notlike "bindings\*" -and $relativePath -notlike "vendor\*"
+    }
+    foreach ($script in $frontendScripts) {
+        node --check $script.FullName
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     go build -trimpath -tags production -ldflags "-H windowsgui -s -w" -o $versionedExecutable ./cmd
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

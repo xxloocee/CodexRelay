@@ -8,8 +8,13 @@ CodexRelay/
 |  |- main.go                       # 参数解析和不可恢复启动错误
 |  `- resource_windows_amd64.syso   # 构建生成的 Windows 资源
 |- internal/
-|  |- desktop/                      # Wails 应用、绑定服务、窗口与托盘
-|  |  `- clientconfig/               # 外部客户端配置适配器、格式辅助与备份写入
+|  |- desktop/                      # Wails 应用、轻量 RPC 门面、窗口与托盘
+|  |  |- state*.go                  # 前端只读快照与公开 DTO
+|  |  |- profile_*.go               # Profile 保存、激活与连通性探测
+|  |  |- failover_*.go              # 故障候选、轮次、提示与切换
+|  |  |- doge_*.go                  # 二狗子账户、目录、同步与通知
+|  |  |- *_service.go               # 设置、用量、通知与生命周期能力
+|  |  `- clientconfig/              # 外部客户端配置适配器、格式辅助与备份写入
 |  |- config/                       # 当前配置模型、校验与 config.json
 |  |- relay/                        # 运行时快照、认证和反向代理
 |  |- network/                      # 出站 Transport 与系统代理只读检测
@@ -17,7 +22,16 @@ CodexRelay/
 |  |- tasknotify/                   # 本机 Codex rollout、SQLite idle gate 与耐久 Webhook 队列
 |  |- storage/                      # 原子 JSON 读写和平台文件替换
 |  `- platform/                     # 开机启动与致命错误平台实现
-|- frontend/                        # 嵌入 Wails 的前端与生成 bindings
+|- frontend/                        # 嵌入 Wails 的原生 ES Module 前端
+|  |- app.js                        # 启动、依赖装配与模块挂载
+|  |- core/                         # RPC 适配、状态域、刷新、运行时和通用交互
+|  |- features/
+|  |  |- profiles/                  # Profile 列表、编辑、激活与排序
+|  |  |- doge/                      # 账户、同步、令牌、公告与引导
+|  |  |- settings/                  # 通用、网络、连接、通知和客户端配置
+|  |  |- usage.js                   # 用量统计与请求明细
+|  |  `- updates.js                 # 应用内更新
+|  |- bindings/                     # Wails 自动生成代码，不承载业务逻辑
 |  `- vendor/                       # 随程序嵌入的固定第三方前端资源
 |- build/windows/                   # ico、manifest 构建输入
 |- docs/                            # 架构和长期设计事实
@@ -42,7 +56,21 @@ config -> network, storage
 usage -> storage
 ```
 
-`network`、`storage` 和 `platform` 不依赖业务包。前端只通过 `frontend/api.js` 间接引用 Wails 自动生成的 bindings，生成目录不手工维护。根包只负责嵌入静态资源，`logo.png` 不复制到其他源码目录。
+`network`、`storage` 和 `platform` 不依赖 `desktop`。前端功能模块只通过 `core/desktop-api.js` 访问 Wails 自动生成的 bindings；`frontend/api.js` 仅保留兼容转发，不承载业务逻辑，生成目录不手工维护。根包只负责嵌入静态资源，`logo.png` 不复制到其他源码目录。
+
+前端保持单向数据流：
+
+```text
+用户操作
+  -> features controller
+  -> core/desktop-api.js
+  -> DesktopService RPC
+  -> core/refresh-coordinator.js
+  -> core/store.js serverState
+  -> features render
+```
+
+`core/store.js` 将后端快照、导航、表单草稿和短生命周期运行态分开保存。主窗口的主动操作、定时器和 Wails 状态事件共用一个刷新协调器；并发刷新会串行合并，等待保存结果的调用方不会在后续刷新完成前读取旧快照。独立提醒窗口拥有自己的只读状态循环，不共享主窗口 DOM 或草稿状态。
 
 ## 请求链路
 
