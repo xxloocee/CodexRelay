@@ -77,11 +77,15 @@ export function createDogeAccount({
   // 手动同步期间短轮询本地状态，只读取阶段标记，不重复请求上游；同步结束后由主请求统一刷新完整页面。
   function startDogeSyncProgressPolling() {
     if (runtimeState.dogeSyncPollTimer) return;
+    const generation = runtimeState.dogeSyncPollGeneration + 1;
+    runtimeState.dogeSyncPollGeneration = generation;
     const poll = async () => {
       runtimeState.dogeSyncPollTimer = null;
-      if (!runtimeState.localDogeSyncing) return;
+      if (!runtimeState.localDogeSyncing || generation !== runtimeState.dogeSyncPollGeneration) return;
       try {
-        setServerSnapshot(await GetState(), { notifyListeners: false });
+        const snapshot = await GetState();
+        if (!runtimeState.localDogeSyncing || generation !== runtimeState.dogeSyncPollGeneration) return;
+        setServerSnapshot(snapshot, { notifyListeners: false });
         renderShell();
         renderConnection();
         renderDogeSyncToast();
@@ -94,8 +98,8 @@ export function createDogeAccount({
   }
 
   function stopDogeSyncProgressPolling() {
-    if (!runtimeState.dogeSyncPollTimer) return;
-    clearTimeout(runtimeState.dogeSyncPollTimer);
+    runtimeState.dogeSyncPollGeneration += 1;
+    if (runtimeState.dogeSyncPollTimer) clearTimeout(runtimeState.dogeSyncPollTimer);
     runtimeState.dogeSyncPollTimer = null;
   }
 

@@ -59,21 +59,22 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 	if directory == "" || !filepath.IsAbs(directory) {
 		return errors.New("CodexRelay 数据目录必须是绝对路径")
 	}
-	oldDirectory := s.runtime.DataDirectory()
-	copiedTaskNotificationState := false
-	if s.taskNotifier != nil && filepath.Clean(oldDirectory) != directory {
-		var err error
-		copiedTaskNotificationState, err = s.taskNotifier.CopyStateTo(directory)
-		if err != nil {
-			return fmt.Errorf("迁移任务通知状态失败: %w", err)
-		}
+	migrate := func() (string, error) {
+		return s.runtime.MigrateDataDirectory(directory, func() error {
+			return config.SaveDataDirectoryPointer(directory)
+		})
 	}
-	oldDirectory, err := s.runtime.MigrateDataDirectory(directory, func() error {
-		return config.SaveDataDirectoryPointer(directory)
-	})
+	oldDirectory := ""
+	copiedTaskNotificationState := false
+	var err error
+	if s.taskNotifier != nil {
+		oldDirectory, copiedTaskNotificationState, err = s.taskNotifier.MigrateStateTo(directory, migrate)
+	} else {
+		oldDirectory, err = migrate()
+	}
 	if err != nil {
-		if copiedTaskNotificationState && s.taskNotifier != nil {
-			s.taskNotifier.DiscardCopiedState(directory)
+		if s.taskNotifier != nil {
+			return fmt.Errorf("迁移任务通知状态失败: %w", err)
 		}
 		return err
 	}

@@ -7,14 +7,17 @@ function normalizeDesktopError(error) {
   return new Error(String(error || "桌面服务调用失败"));
 }
 
-export async function callDesktop(method, ...args) {
+export function callDesktop(method, ...args) {
   const binding = desktop[method];
   if (typeof binding !== "function") throw new Error(`未知桌面服务方法：${method}`);
+  let request;
   try {
-    return await binding(...args);
+    request = binding(...args);
   } catch (error) {
-    throw normalizeDesktopError(error);
+    return Promise.reject(normalizeDesktopError(error));
   }
+  // Wails 返回 CancellablePromise；使用 then/catch 链而不是 async，保留 cancel/cancelOn 能力。
+  return request.catch((error) => { throw normalizeDesktopError(error); });
 }
 
 export const ActivateProfile = (...args) => callDesktop("ActivateProfile", ...args);

@@ -56,7 +56,7 @@ config -> network, storage
 usage -> storage
 ```
 
-`network`、`storage` 和 `platform` 不依赖 `desktop`。前端功能模块只通过 `core/desktop-api.js` 访问 Wails 自动生成的 bindings；`frontend/api.js` 仅保留兼容转发，不承载业务逻辑，生成目录不手工维护。根包只负责嵌入静态资源，`logo.png` 不复制到其他源码目录。
+`network`、`storage` 和 `platform` 不依赖 `desktop`。前端功能模块只通过 `core/desktop-api.js` 访问 Wails 自动生成的 bindings；`frontend/api.js` 仅保留内部兼容转发，不定义可复用的公共库 API，也不承载业务逻辑，但保留 Wails Promise 的取消能力。生成目录不手工维护。根包只负责嵌入静态资源，`logo.png` 不复制到其他源码目录。
 
 前端保持单向数据流：
 

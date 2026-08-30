@@ -317,7 +317,7 @@ runtime      loading、timer、modal、toast 和同步过程
 
 已完成的结构事实：
 
-- 前端由 `core/desktop-api.js` 统一访问 generated bindings，业务模块不再直接依赖生成目录或兼容入口 `api.js`。
+- 前端由 `core/desktop-api.js` 统一访问 generated bindings，业务模块不再直接依赖生成目录或内部兼容入口 `api.js`；该入口不作为可复用公共库 API。
 - 前端状态已拆为 `serverState`、`navigation`、`drafts` 和 `runtimeState`，主窗口状态刷新由单一协调器串行处理。
 - Profiles、Doge、Settings 已按功能目录聚合；Usage 和 Updates 保持单文件，避免无收益的继续拆分。
 - 后端公开 RPC 仍保留在 `DesktopService`，实现按 State、Profile、Failover、Doge、Settings、Usage、Notification 和 Lifecycle 聚合。

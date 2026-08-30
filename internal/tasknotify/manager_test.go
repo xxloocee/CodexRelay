@@ -315,3 +315,54 @@ func TestManagerUsesCodexSQLiteIdleGates(t *testing.T) {
 		t.Fatalf("subagent 候选未抑制: %v", suppressed)
 	}
 }
+
+func TestMigrateStateToBlocksQueueWritesUntilRuntimeSwitch(t *testing.T) {
+	oldDirectory := t.TempDir()
+	newDirectory := filepath.Join(t.TempDir(), "new-data")
+	settings := Settings{Enabled: true, Events: EventSettings{TokenAutoSwitched: true}}
+	var directoryMu sync.RWMutex
+	currentDirectory := oldDirectory
+	manager := NewManager(func() Settings { return settings }, func() string {
+		directoryMu.RLock()
+		defer directoryMu.RUnlock()
+		return currentDirectory
+	}, nil)
+	if err := manager.Enqueue(EventTokenAutoSwitched, "before-migration"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := manager.MigrateStateTo(newDirectory, func() (string, error) {
+			close(started)
+			<-release
+			directoryMu.Lock()
+			currentDirectory = newDirectory
+			directoryMu.Unlock()
+			return oldDirectory, nil
+		})
+		done <- err
+	}()
+	<-started
+
+	enqueueDone := make(chan error, 1)
+	go func() { enqueueDone <- manager.Enqueue(EventTokenAutoSwitched, "during-migration") }()
+	select {
+	case err := <-enqueueDone:
+		t.Fatalf("queue write completed before migration switch: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-enqueueDone; err != nil {
+		t.Fatal(err)
+	}
+	if status := manager.Status(); status.Outbox != 2 {
+		t.Fatalf("migrated queue should contain copied and post-switch events: %+v", status)
+	}
+}

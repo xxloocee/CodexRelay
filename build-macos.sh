@@ -54,8 +54,9 @@ if [[ "$HOST_GOARCH" == "$GO_ARCH" ]]; then
   go test ./...
   go vet ./...
 fi
-node --check "$PROJECT_ROOT/frontend/app.js"
-node --check "$PROJECT_ROOT/frontend/api.js"
+while IFS= read -r -d '' script; do
+  node --check "$script"
+done < <(find "$PROJECT_ROOT/frontend" -type f -name '*.js' ! -path '*/bindings/*' ! -path '*/vendor/*' -print0)
 export GOARCH="$GO_ARCH"
 go build -trimpath -tags production -ldflags "-s -w -X codexrelay/internal/desktop.applicationVersion=$VERSION" -o "$BINARY" ./cmd
 

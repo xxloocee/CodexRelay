@@ -242,6 +242,38 @@ func (m *Manager) Enqueue(eventType, identity string, detailValues ...EventDetai
 func (m *Manager) CopyStateTo(targetDataDirectory string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.copyStateToLocked(targetDataDirectory)
+}
+
+// MigrateStateTo 在任务通知队列锁内完成状态预复制和主目录切换，避免复制完成后
+// 到 Runtime 切换前有新事件写入旧目录。migrate 不得再次调用本 Manager 的方法。
+func (m *Manager) MigrateStateTo(targetDataDirectory string, migrate func() (string, error)) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if migrate == nil {
+		return "", false, errors.New("任务通知目录迁移回调为空")
+	}
+	source := m.stateDirectory()
+	target := filepath.Join(filepath.Clean(targetDataDirectory), stateDirectoryName)
+	if source != "" && filepath.Clean(source) == target {
+		oldDirectory, err := migrate()
+		return oldDirectory, false, err
+	}
+	copied, err := m.copyStateToLocked(targetDataDirectory)
+	if err != nil {
+		return "", false, err
+	}
+	oldDirectory, err := migrate()
+	if err != nil {
+		if copied {
+			m.discardCopiedStateLocked(targetDataDirectory)
+		}
+		return "", copied, err
+	}
+	return oldDirectory, copied, nil
+}
+
+func (m *Manager) copyStateToLocked(targetDataDirectory string) (bool, error) {
 	source := m.stateDirectory()
 	target := filepath.Join(filepath.Clean(targetDataDirectory), stateDirectoryName)
 	if _, err := os.Stat(target); err == nil {
@@ -259,11 +291,19 @@ func (m *Manager) CopyStateTo(targetDataDirectory string) (bool, error) {
 
 // DiscardCopiedState 只删除本次迁移预复制出的状态，调用方只能在主迁移失败时调用。
 func (m *Manager) DiscardCopiedState(targetDataDirectory string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.discardCopiedStateLocked(targetDataDirectory)
+}
+
+func (m *Manager) discardCopiedStateLocked(targetDataDirectory string) {
 	_ = os.RemoveAll(filepath.Join(filepath.Clean(targetDataDirectory), stateDirectoryName))
 }
 
 // FinalizeMigration 在主配置已切换后删除旧状态；删除失败只保留重复本地状态，不影响新目录继续工作。
 func (m *Manager) FinalizeMigration(oldDataDirectory string, copied bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if !copied {
 		return nil
 	}

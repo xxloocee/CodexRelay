@@ -45,6 +45,7 @@ export const runtimeState = {
   toastTimer: null,
   toastCleanupTimer: null,
   dogeSyncPollTimer: null,
+  dogeSyncPollGeneration: 0,
   dogeRemoteSyncing: false,
   dogeCategoryDialogSignature: "",
   localDogeSyncing: false,
