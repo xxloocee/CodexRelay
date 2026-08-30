@@ -119,6 +119,10 @@ func Run(options LaunchOptions) error {
 		return fmt.Errorf("初始化 Windows 更新服务失败: %w", err)
 	}
 
+	windowBackground := application.NewRGB(255, 255, 255)
+	if cfg.Preferences.ColorMode == config.ColorModeDark {
+		windowBackground = application.NewRGB(12, 16, 21)
+	}
 	window = wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "CodexRelay",
 		Width:            1120,
@@ -127,7 +131,7 @@ func Run(options LaunchOptions) error {
 		MinHeight:        560,
 		URL:              "/",
 		Hidden:           shouldStartHidden(options.Autostart, cfg.Preferences),
-		BackgroundColour: application.NewRGB(255, 255, 255),
+		BackgroundColour: windowBackground,
 	})
 	emitDefaultView := func() {
 		state := runtime.State()

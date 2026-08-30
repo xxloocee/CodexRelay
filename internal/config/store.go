@@ -116,6 +116,12 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Preferences.VisibleCategories == nil {
 		cfg.Preferences.VisibleCategories = append([]string(nil), Categories...)
 	}
+	if cfg.Preferences.Theme == "" {
+		cfg.Preferences.Theme = DefaultTheme
+	}
+	if cfg.Preferences.ColorMode == "" {
+		cfg.Preferences.ColorMode = DefaultColorMode
+	}
 	if cfg.Preferences.RestoreViewMode == "" {
 		cfg.Preferences.RestoreViewMode = RestoreViewCurrent
 	}

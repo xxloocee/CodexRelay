@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	AuthFailureThreshold     = 5
-	UpstreamFailureThreshold = 5
+	AuthFailureThreshold     = config.DefaultAuthFailureThreshold
+	UpstreamFailureThreshold = config.DefaultUpstreamFailureThreshold
 	UpstreamFailureWindow    = 3 * time.Minute
 )
 

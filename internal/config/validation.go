@@ -165,8 +165,17 @@ func ValidateFailoverOrder(order map[string][]string, profiles []Profile) error 
 	return nil
 }
 
-// ValidatePreferences 校验主页展示和窗口恢复偏好；这些字段只影响界面状态，不改变代理路由或启用映射。
+// ValidatePreferences 校验外观、主页展示和窗口恢复偏好；这些字段只影响界面状态，不改变代理路由或启用映射。
 func ValidatePreferences(preferences Preferences) error {
+	switch preferences.Theme {
+	case ThemeFuturePink, ThemeEnergyOrange, ThemeTechPurple, ThemeClassicBlue,
+		ThemeDeepBlue, ThemeLightSpeedCyan, ThemeNebulaGradient, ThemeAuroraGradient:
+	default:
+		return fmt.Errorf("主题无效: %q", preferences.Theme)
+	}
+	if preferences.ColorMode != ColorModeLight && preferences.ColorMode != ColorModeDark {
+		return fmt.Errorf("主题模式无效: %q", preferences.ColorMode)
+	}
 	if len(preferences.VisibleCategories) == 0 {
 		return errors.New("主页至少需要显示一个 API 类别")
 	}

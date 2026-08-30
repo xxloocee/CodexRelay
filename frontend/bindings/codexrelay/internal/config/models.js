@@ -59,7 +59,7 @@ export class DogeAlertSettings {
 }
 
 /**
- * Preferences 保存窗口生命周期、主页类别可见性、默认筛选和恢复策略；不会改变代理运行时路由。
+ * Preferences 保存窗口生命周期、外观、主页类别可见性、默认筛选和恢复策略；不会改变代理运行时路由。
  */
 export class Preferences {
     /**
@@ -87,6 +87,20 @@ export class Preferences {
              * @type {boolean}
              */
             this["startHidden"] = false;
+        }
+        if (!("theme" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["theme"] = "";
+        }
+        if (!("colorMode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["colorMode"] = "";
         }
         if (!("visibleCategories" in $$source)) {
             /**
@@ -126,10 +140,10 @@ export class Preferences {
      * @returns {Preferences}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType0;
+        const $$createField5_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("visibleCategories" in $$parsedSource) {
-            $$parsedSource["visibleCategories"] = $$createField3_0($$parsedSource["visibleCategories"]);
+            $$parsedSource["visibleCategories"] = $$createField5_0($$parsedSource["visibleCategories"]);
         }
         return new Preferences(/** @type {Partial<Preferences>} */($$parsedSource));
     }
