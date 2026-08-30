@@ -89,6 +89,7 @@ h1, h2, p { margin-top: 0; }
 .icon-play { --icon-url: url("/icons/play.svg"); }
 .icon-plus { --icon-url: url("/icons/plus.svg"); }
 .icon-save { --icon-url: url("/icons/save.svg"); }
+.icon-status { --icon-url: url("/icons/status.svg"); }
 .icon-settings { --icon-url: url("/icons/settings.svg"); }
 .icon-trash-2 { --icon-url: url("/icons/trash-2.svg"); }
 .icon-x { --icon-url: url("/icons/x.svg"); }
@@ -399,8 +400,8 @@ input[readonly]:focus { border-color: #d8dbe0; box-shadow: none; }
   padding: 7px 15px;
   border: 1px solid transparent;
 }
-.primary-button { background: var(--blue); color: #fff !important; }
-.primary-button > span { color: #fff !important; }
+.primary-button { background: var(--blue); color: var(--on-accent); }
+.primary-button > span { color: inherit; }
 .primary-button:hover { background: #0877e5; }
 .secondary-button { border-color: #cfd4da; background: #fff; color: #3f454d; }
 .secondary-button:hover { border-color: #9da5ae; background: var(--surface); }
@@ -912,7 +913,7 @@ body.modal-open { overflow: hidden; padding-right: var(--modal-scrollbar-compens
 .announcement-wrap { position: relative; flex: 0 0 auto; }
 .announcement-button { position: relative; width: 38px; height: 38px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #4c5560; }
 .announcement-button:hover, .announcement-button:focus-visible { background: var(--surface); color: #202328; outline: none; }
-.announcement-button img { width: 19px; height: 19px; object-fit: contain; }
+.announcement-button .icon { width: 19px; height: 19px; }
 .announcement-badge { position: absolute; top: -6px; right: -6px; min-width: 17px; height: 17px; display: grid; place-items: center; padding: 0 4px; border: 2px solid #fff; border-radius: 9px; background: #e14848; color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
 .announcement-panel { position: absolute; z-index: 25; top: calc(100% + 10px); right: 0; width: min(420px, calc(100vw - 30px)); max-height: min(650px, calc(100vh - 100px)); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; padding: 16px; border: 1px solid #dfe4e9; border-radius: 12px; background: #fff; box-shadow: 0 18px 42px rgba(28, 42, 55, .2); }
 .announcement-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }

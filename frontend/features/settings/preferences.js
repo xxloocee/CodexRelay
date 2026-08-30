@@ -2,8 +2,40 @@ import { SetDogeAlertSettings, SetPreferences, SetTokenSwitchSettings } from "..
 import { $ } from "../../core/dom.js";
 import { errorMessage, toast } from "../../core/feedback.js";
 import { categoryOptions, drafts, serverState } from "../../core/store.js";
+import { applyAppearance, normalizeAppearance } from "../../core/theme.js";
 
 export function createPreferences({ loadState, visibleCategorySet, categoryLabel }) {
+  let appearanceSaveTimer = null;
+
+  function selectedAppearance() {
+    return normalizeAppearance({
+      theme: document.querySelector("#themeOptions .theme-option.active")?.dataset.theme,
+      colorMode: document.querySelector("#colorModeOptions button.active")?.dataset.colorMode,
+    });
+  }
+
+  function renderAppearance(preferences) {
+    const appearance = applyAppearance(preferences);
+    document.querySelectorAll("#themeOptions .theme-option").forEach((button) => {
+      const active = button.dataset.theme === appearance.theme;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    document.querySelectorAll("#colorModeOptions button").forEach((button) => {
+      const active = button.dataset.colorMode === appearance.colorMode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+  }
+
+  function saveAppearanceSoon() {
+    clearTimeout(appearanceSaveTimer);
+    appearanceSaveTimer = setTimeout(() => {
+      appearanceSaveTimer = null;
+      savePreferences();
+    }, 120);
+  }
+
   function renderPreferences() {
     const preferences = serverState.snapshot.preferences || {};
     const preserveDraft = drafts.preferencesDirty;
@@ -11,6 +43,7 @@ export function createPreferences({ loadState, visibleCategorySet, categoryLabel
       $("closeToTray").checked = preferences.closeToTray;
       $("launchAtStartup").checked = preferences.launchAtStartup;
       $("startHidden").checked = preferences.startHidden;
+      renderAppearance(preferences);
     }
     if (!drafts.tokenSwitchDirty) renderTokenSwitchSettings();
     if (!drafts.dogeAlertDirty) renderDogeAlertSettings();
@@ -70,8 +103,8 @@ export function createPreferences({ loadState, visibleCategorySet, categoryLabel
       $(id).checked = Boolean(settings[id]);
     }
     $("failoverLoop").checked = Boolean(settings.loop);
-    $("authFailureThreshold").value = String(settings.authFailureThreshold || 5);
-    $("upstreamFailureThreshold").value = String(settings.upstreamFailureThreshold || 5);
+    $("authFailureThreshold").value = String(settings.authFailureThreshold || 3);
+    $("upstreamFailureThreshold").value = String(settings.upstreamFailureThreshold || 3);
     $("upstreamFailureWindowMinutes").value = String(settings.upstreamFailureWindowMinutes || 3);
   }
 
@@ -148,6 +181,7 @@ export function createPreferences({ loadState, visibleCategorySet, categoryLabel
       closeToTray: $("closeToTray").checked,
       launchAtStartup: $("launchAtStartup").checked,
       startHidden: $("startHidden").checked,
+      ...selectedAppearance(),
       visibleCategories,
       defaultSource: $("defaultSource").value,
       defaultCategory,
@@ -159,12 +193,25 @@ export function createPreferences({ loadState, visibleCategorySet, categoryLabel
       await loadState();
       toast("通用设置已保存");
     } catch (error) {
+      if (draftRevision === drafts.preferencesDraftRevision) drafts.preferencesDirty = false;
       await loadState();
       toast(errorMessage(error), true);
     }
   }
 
   function mount() {
+    document.querySelectorAll("#themeOptions .theme-option").forEach((button) => button.addEventListener("click", () => {
+      const appearance = selectedAppearance();
+      renderAppearance({ ...appearance, theme: button.dataset.theme });
+      markPreferencesDirty();
+      saveAppearanceSoon();
+    }));
+    document.querySelectorAll("#colorModeOptions button").forEach((button) => button.addEventListener("click", () => {
+      const appearance = selectedAppearance();
+      renderAppearance({ ...appearance, colorMode: button.dataset.colorMode });
+      markPreferencesDirty();
+      saveAppearanceSoon();
+    }));
     for (const id of ["closeToTray", "launchAtStartup", "startHidden", "defaultSource", "defaultCategory", "restoreViewMode"]) {
       $(id).addEventListener("change", () => {
         markPreferencesDirty();

@@ -9,12 +9,15 @@
   @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
   @Remind        : 二次开发请保留原版权信息，谢谢。
 -->
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="tech-purple" data-color-mode="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CodexRelay</title>
+  <script src="/core/theme-bootstrap.js"></script>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/theme.css">
+  <link rel="stylesheet" href="/theme-dark.css">
 </head>
 <body>
   <div id="appShell">
@@ -45,7 +48,7 @@
           <button id="openDogeTopup" class="doge-topup-button" type="button"><span class="icon icon-plus" aria-hidden="true"></span><span>兑换额度</span></button>
           <div id="announcementWrap" class="announcement-wrap">
             <button id="openAnnouncements" class="announcement-button" type="button" title="系统公告" aria-label="系统公告" aria-expanded="false" aria-controls="announcementPanel">
-              <img src="/icons/status.svg" alt="">
+              <span class="icon icon-status" aria-hidden="true"></span>
               <span id="announcementBadge" class="announcement-badge hidden">0</span>
             </button>
             <section id="announcementPanel" class="announcement-panel hidden" role="dialog" aria-label="系统公告">
@@ -148,6 +151,31 @@
         </nav>
         <main id="settingsContent" class="settings-content">
         <div id="generalPanel" class="settings-panel">
+          <section class="appearance-settings" aria-labelledby="appearanceHeading">
+            <div class="panel-heading"><div><span class="panel-kicker">个性化</span><h2 id="appearanceHeading">主题外观</h2></div></div>
+            <div class="appearance-controls">
+              <fieldset class="appearance-fieldset">
+                <legend>主题色</legend>
+                <div id="themeOptions" class="theme-option-grid" role="group" aria-label="主题色">
+                  <button class="theme-option" type="button" data-theme="classic-blue" aria-pressed="false"><span class="theme-swatch theme-swatch-classic-blue" aria-hidden="true"></span><span>经典蓝</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="energy-orange" aria-pressed="false"><span class="theme-swatch theme-swatch-orange" aria-hidden="true"></span><span>能量橙</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="future-pink" aria-pressed="false"><span class="theme-swatch theme-swatch-pink" aria-hidden="true"></span><span>未来粉</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option active" type="button" data-theme="tech-purple" aria-pressed="true"><span class="theme-swatch theme-swatch-purple" aria-hidden="true"></span><span>科技紫</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="deep-blue" aria-pressed="false"><span class="theme-swatch theme-swatch-deep-blue" aria-hidden="true"></span><span>深邃蓝</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="light-speed-cyan" aria-pressed="false"><span class="theme-swatch theme-swatch-cyan" aria-hidden="true"></span><span>光速青</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="nebula-gradient" aria-pressed="false"><span class="theme-swatch theme-swatch-nebula" aria-hidden="true"></span><span>星河渐变</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                  <button class="theme-option" type="button" data-theme="aurora-gradient" aria-pressed="false"><span class="theme-swatch theme-swatch-aurora" aria-hidden="true"></span><span>极光渐变</span><span class="icon icon-check theme-option-check" aria-hidden="true"></span></button>
+                </div>
+              </fieldset>
+              <fieldset class="appearance-fieldset appearance-mode-fieldset">
+                <legend>模式</legend>
+                <div id="colorModeOptions" class="segmented appearance-mode-control" role="group" aria-label="显示模式">
+                  <button class="active" type="button" data-color-mode="light" aria-pressed="true"><span class="icon icon-sun" aria-hidden="true"></span><span>浅色</span></button>
+                  <button type="button" data-color-mode="dark" aria-pressed="false"><span class="icon icon-moon" aria-hidden="true"></span><span>深色</span></button>
+                </div>
+              </fieldset>
+            </div>
+          </section>
           <div class="panel-heading"><div><span class="panel-kicker">应用行为</span><h2>后台运行</h2><p class="panel-description">控制窗口关闭和 Windows 启动时的运行方式。</p></div></div>
           <div class="setting-list">
             <label class="setting-row"><span><strong>关闭到系统托盘</strong><small>点击关闭按钮后保持代理运行</small></span><input id="closeToTray" class="switch-input" type="checkbox"></label>

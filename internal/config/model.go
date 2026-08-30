@@ -32,8 +32,8 @@ const (
 	// TokenSwitchModeAuto 在达到故障条件后自动切换到候选 Profile。
 	TokenSwitchModeAuto = "auto"
 
-	DefaultAuthFailureThreshold         = 5
-	DefaultUpstreamFailureThreshold     = 5
+	DefaultAuthFailureThreshold         = 3
+	DefaultUpstreamFailureThreshold     = 3
 	DefaultUpstreamFailureWindowMinutes = 3
 	DefaultQuotaAlertThresholdUSD       = 1
 )
@@ -41,6 +41,20 @@ const (
 const (
 	SourceDoge   = "doge"
 	SourceCustom = "custom"
+
+	ThemeFuturePink     = "future-pink"
+	ThemeEnergyOrange   = "energy-orange"
+	ThemeTechPurple     = "tech-purple"
+	ThemeClassicBlue    = "classic-blue"
+	ThemeDeepBlue       = "deep-blue"
+	ThemeLightSpeedCyan = "light-speed-cyan"
+	ThemeNebulaGradient = "nebula-gradient"
+	ThemeAuroraGradient = "aurora-gradient"
+	DefaultTheme        = ThemeTechPurple
+
+	ColorModeLight   = "light"
+	ColorModeDark    = "dark"
+	DefaultColorMode = ColorModeLight
 
 	// RestoreViewCurrent 恢复窗口时保留用户当前的主页来源和类别筛选。
 	RestoreViewCurrent = "current"
@@ -247,11 +261,13 @@ type DogeConnection struct {
 	LastSyncError       string                `json:"lastSyncError,omitempty"`
 }
 
-// Preferences 保存窗口生命周期、主页类别可见性、默认筛选和恢复策略；不会改变代理运行时路由。
+// Preferences 保存窗口生命周期、外观、主页类别可见性、默认筛选和恢复策略；不会改变代理运行时路由。
 type Preferences struct {
 	CloseToTray       bool     `json:"closeToTray"`
 	LaunchAtStartup   bool     `json:"launchAtStartup"`
 	StartHidden       bool     `json:"startHidden"`
+	Theme             string   `json:"theme"`
+	ColorMode         string   `json:"colorMode"`
 	VisibleCategories []string `json:"visibleCategories"`
 	DefaultSource     string   `json:"defaultSource"`
 	DefaultCategory   string   `json:"defaultCategory"`
@@ -358,7 +374,7 @@ func Default(proxyPort int) AppConfig {
 		ActiveProfiles:   map[string]string{},
 		ClientConfigs:    map[string]ClientConfig{},
 		Network:          network.Settings{Mode: "system"},
-		Preferences:      Preferences{CloseToTray: true, VisibleCategories: append([]string(nil), Categories...), DefaultSource: "", DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
+		Preferences:      Preferences{CloseToTray: true, Theme: DefaultTheme, ColorMode: DefaultColorMode, VisibleCategories: append([]string(nil), Categories...), DefaultSource: "", DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
 		TaskNotification: TaskNotification{Events: DefaultTaskNotificationEvents(), EventsInitialized: true, IdleGraceSeconds: DefaultTaskNotificationIdleGraceSeconds, RequestTimeoutSeconds: DefaultTaskNotificationRequestTimeoutSeconds},
 		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{BalanceAlertEnabled: true, BalanceAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, BalanceAlertRecords: []DogeBalanceAlertRecord{}, SubscriptionAlertRecords: []DogeSubscriptionAlertRecord{}, Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
 		TokenSwitch:      DefaultTokenSwitchSettings(),
