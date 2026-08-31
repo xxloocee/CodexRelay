@@ -16,6 +16,7 @@ export {
     DogeBillingTokenMetrics,
     DogeState,
     DogeTokenCategoryInput,
+    DogeTokenCreateInput,
     DogeUsageAnalyticsQuery,
     DogeUsageLog,
     DogeUsageLogPage,

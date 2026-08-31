@@ -45,6 +45,7 @@
               <div id="dogeSubscriptionRows" class="doge-subscription-rows"></div>
             </div>
           </div>
+          <button id="openDogeTokenCreate" class="doge-token-create-button" type="button" title="创建 API 密钥" aria-label="创建 API 密钥"><span class="icon icon-key-round" aria-hidden="true"></span><span>创建密钥</span></button>
           <button id="openDogeTopup" class="doge-topup-button" type="button"><span class="icon icon-plus" aria-hidden="true"></span><span>兑换额度</span></button>
           <div id="announcementWrap" class="announcement-wrap">
             <button id="openAnnouncements" class="announcement-button" type="button" title="系统公告" aria-label="系统公告" aria-expanded="false" aria-controls="announcementPanel">
@@ -402,6 +403,18 @@
       <label class="field doge-topup-field"><span>兑换码</span><input id="dogeTopupCode" type="text" autocomplete="off" placeholder="输入您的兑换码" maxlength="256"></label>
       <p id="dogeTopupError" class="doge-topup-error hidden"></p>
       <footer class="doge-topup-footer"><button id="dogeTopupPurchase" class="doge-purchase-link hidden" type="button">需要兑换码？点击购买 ↗</button><button id="submitDogeTopup" class="primary-button" type="button"><span class="icon icon-check" aria-hidden="true"></span><span data-topup-label>兑换额度</span></button></footer>
+    </section>
+  </div>
+  <div id="dogeTokenCreateModal" class="modal-backdrop hidden" role="presentation">
+    <section class="modal-panel doge-token-create-panel" role="dialog" aria-modal="true" aria-labelledby="dogeTokenCreateTitle">
+      <header class="modal-heading"><div class="doge-topup-heading"><span class="doge-token-create-mark"><span class="icon icon-key-round" aria-hidden="true"></span></span><div><span class="panel-kicker">二狗子账户</span><h2 id="dogeTokenCreateTitle">创建 API 密钥</h2></div></div><button id="closeDogeTokenCreateModal" class="back-button" type="button" title="关闭" aria-label="关闭"><span class="icon icon-x" aria-hidden="true"></span></button></header>
+      <p class="modal-description">新密钥默认永不过期、不限额度，创建后进入待导入列表。</p>
+      <div class="doge-token-create-fields">
+        <label class="field"><span>密钥名称</span><input id="dogeTokenName" type="text" autocomplete="off" placeholder="例如：Codex 主线路" maxlength="50"></label>
+        <label class="field"><span>远端分组</span><select id="dogeTokenGroup" aria-label="API 密钥远端分组"></select></label>
+      </div>
+      <p id="dogeTokenCreateError" class="doge-topup-error hidden"></p>
+      <footer class="modal-footer"><button id="submitDogeTokenCreate" class="primary-button" type="button"><span class="icon icon-key-round" aria-hidden="true"></span><span data-button-label>创建密钥</span></button></footer>
     </section>
   </div>
   <div id="onboardingModal" class="modal-backdrop hidden" role="presentation">

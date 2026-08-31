@@ -204,6 +204,13 @@ type DogeTokenCategoryInput struct {
 	Category string `json:"category"`
 }
 
+// DogeTokenCreateInput 描述使用二狗子 User 权限令牌创建新 API 密钥所需的最小参数。
+// 分组值必须使用 /api/user/self/groups 返回的原始 key，名称由用户自行填写。
+type DogeTokenCreateInput struct {
+	Name  string `json:"name"`
+	Group string `json:"group"`
+}
+
 type PublicProfile struct {
 	ID       string `json:"id"`
 	Source   string `json:"source"`

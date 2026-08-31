@@ -28,6 +28,7 @@ export const ClearUsage = (...args) => callDesktop("ClearUsage", ...args);
 export const ConfigureClient = (...args) => callDesktop("ConfigureClient", ...args);
 export const ConfigureDetectedClients = (...args) => callDesktop("ConfigureDetectedClients", ...args);
 export const CompleteOnboarding = (...args) => callDesktop("CompleteOnboarding", ...args);
+export const CreateDogeToken = (...args) => callDesktop("CreateDogeToken", ...args);
 export const DeleteProfile = (...args) => callDesktop("DeleteProfile", ...args);
 export const DismissDogeNotification = (...args) => callDesktop("DismissDogeNotification", ...args);
 export const DismissDogeTokenSwitch = (...args) => callDesktop("DismissDogeTokenSwitch", ...args);

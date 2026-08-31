@@ -89,6 +89,7 @@ h1, h2, p { margin-top: 0; }
 .icon-eye { --icon-url: url("/icons/eye.svg"); }
 .icon-eye-off { --icon-url: url("/icons/eye-off.svg"); }
 .icon-grip-vertical { --icon-url: url("/icons/grip-vertical.svg"); }
+.icon-key-round { --icon-url: url("/icons/key-round.svg"); }
 .icon-load { --icon-url: url("/icons/load.svg"); }
 .icon-refresh { --icon-url: url("/icons/refresh.svg"); }
 .icon-play { --icon-url: url("/icons/play.svg"); }
@@ -1002,7 +1003,11 @@ body.modal-open { overflow: hidden; padding-right: var(--modal-scrollbar-compens
 .doge-quota-summary.is-syncing { min-width: 132px; }
 .doge-quota-caption { color: #718397; font-size: 10px; white-space: nowrap; }
 .doge-quota-summary strong { color: #1d6aa1; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.doge-topup-button { min-height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 1px solid #d9cdf9; border-radius: 8px; background: #f7f3ff; color: #6d4db5; white-space: nowrap; }
+.doge-token-create-button, .doge-topup-button { min-height: 38px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 8px; white-space: nowrap; }
+.doge-token-create-button { border: 1px solid #b9d8ca; background: #f1faf6; color: #176b4b; }
+.doge-token-create-button:hover, .doge-token-create-button:focus-visible { border-color: #7fbaa2; background: #e7f6ef; outline: none; }
+.doge-token-create-button .icon { width: 15px; height: 15px; }
+.doge-topup-button { border: 1px solid #d9cdf9; background: #f7f3ff; color: #6d4db5; }
 .doge-topup-button:hover, .doge-topup-button:focus-visible { border-color: #bba5ed; background: #f0eaff; outline: none; }
 .doge-topup-button .icon { width: 15px; height: 15px; }
 .announcement-wrap { position: relative; flex: 0 0 auto; }
@@ -1067,6 +1072,11 @@ body.modal-open { overflow: hidden; padding-right: var(--modal-scrollbar-compens
 .doge-subscription-row span span { overflow: hidden; color: #4e5b68; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .doge-subscription-row small { white-space: nowrap; }
 .doge-topup-panel { width: min(450px, 100%); }
+.doge-token-create-panel { width: min(480px, 100%); }
+.doge-token-create-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: #e7f6ef; color: #176b4b; }
+.doge-token-create-mark .icon { width: 19px; height: 19px; }
+.doge-token-create-fields { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(150px, .65fr); gap: 14px; }
+.doge-token-create-fields :is(input, select) { min-height: 44px; width: 100%; }
 .doge-topup-heading { display: flex; align-items: center; gap: 11px; }
 .doge-topup-mark { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: #f0eaff; color: #704ab8; }
 .doge-topup-mark .icon { width: 19px; height: 19px; }
@@ -1135,9 +1145,12 @@ body.modal-open { overflow: hidden; padding-right: var(--modal-scrollbar-compens
   .doge-quota-summary.is-syncing { min-width: 105px; }
   .doge-quota-caption { display: none; }
   .doge-topup-button { padding: 0 9px; }
+  .doge-token-create-button { padding: 0 9px; }
+  .doge-token-create-button span:last-child { display: none; }
   .doge-topup-button span:last-child { display: none; }
   .doge-quota-popover { position: fixed; top: 67px; right: 15px; }
   .announcement-panel { position: fixed; top: 67px; right: 15px; max-height: calc(100dvh - 90px); }
   .doge-topup-footer { align-items: flex-end; flex-direction: column; }
   .doge-topup-footer .primary-button { width: 100%; }
+  .doge-token-create-fields { grid-template-columns: 1fr; }
 }

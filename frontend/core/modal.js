@@ -2,7 +2,7 @@ import { runtimeState } from "./store.js";
 import { $ } from "./dom.js";
 
 export function syncModalBody() {
-  const modalIDs = ["onboardingModal", "dogeCategoryModal", "dogeTopupModal", "clientSetupModal", "confirmModal"];
+  const modalIDs = ["onboardingModal", "dogeCategoryModal", "dogeTopupModal", "dogeTokenCreateModal", "clientSetupModal", "confirmModal"];
   const body = document.body;
   const shouldLock = modalIDs.some((id) => !$(id).classList.contains("hidden"));
   const isLocked = body.classList.contains("modal-open");

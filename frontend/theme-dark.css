@@ -248,6 +248,9 @@
 :root[data-color-mode="dark"] :is(.doge-quota-summary strong, .doge-quota-overview strong) { color: var(--accent); }
 :root[data-color-mode="dark"] .doge-topup-button { border-color: #4d3e68; background: #241c33; color: #c5a9ff; }
 :root[data-color-mode="dark"] .doge-topup-button:hover { border-color: #6f5796; background: #2d2240; }
+:root[data-color-mode="dark"] .doge-token-create-button { border-color: #315d4b; background: #162820; color: #79d2aa; }
+:root[data-color-mode="dark"] .doge-token-create-button:hover { border-color: #477b66; background: #1d342a; }
+:root[data-color-mode="dark"] .doge-token-create-mark { background: #183126; color: #79d2aa; }
 :root[data-color-mode="dark"] .doge-topup-mark { background: #281f3b; color: #c5a9ff; }
 :root[data-color-mode="dark"] :is(.usage-key-badge, .usage-model-badge, .usage-cost-badge) { border-color: var(--line); background: var(--surface); color: var(--text); }
 :root[data-color-mode="dark"] :is(.billing-stat-value, .billing-stat-details strong, .billing-overview-total strong, .usage-token-pair, .usage-details, .billing-total-value) { color: var(--text); }
