@@ -21,13 +21,14 @@ import * as network$0 from "../network/models.js";
 import * as $models from "./models.js";
 
 /**
- * ActivateProfile 启用指定 Profile；二狗子来源必须仍存在于最新目录且当前分组可用。
- * 成功后清理原活动 Profile 的失败统计，新请求立即读取新的运行时快照。
+ * ActivateProfile 启用指定 Profile；可选的 configure 参数仅在用户确认时同步外部客户端。
+ * 二狗子来源必须仍存在于最新目录且当前分组可用。
  * @param {string} id
+ * @param {...boolean} configure
  * @returns {$CancellablePromise<void>}
  */
-export function ActivateProfile(id) {
-    return $Call.ByID(115523217, id);
+export function ActivateProfile(id, ...configure) {
+    return $Call.ByID(115523217, id, configure);
 }
 
 /**
@@ -83,6 +84,14 @@ export function CompleteOnboarding() {
  */
 export function ConfigureClient(category, profileID) {
     return $Call.ByID(3427215176, category, profileID);
+}
+
+/**
+ * ConfigureDetectedClients 在用户明确确认后批量配置已检测到的外部客户端。
+ * @returns {$CancellablePromise<void>}
+ */
+export function ConfigureDetectedClients() {
+    return $Call.ByID(246656955);
 }
 
 /**
@@ -273,6 +282,15 @@ export function SetClientConfigPath(category, directory) {
  */
 export function SetClientConfigSkip(category, skip) {
     return $Call.ByID(2542801733, category, skip);
+}
+
+/**
+ * SetClientAccessHost 更新写入外部客户端的访问主机。
+ * @param {string} raw
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetClientAccessHost(raw) {
+    return $Call.ByID(1540877308, raw);
 }
 
 /**

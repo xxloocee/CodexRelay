@@ -133,7 +133,7 @@
           <button id="deleteProfile" class="danger-button" type="button"><span class="icon icon-trash-2" aria-hidden="true"></span><span>删除</span></button>
           <div class="footer-actions">
             <button id="testProfile" class="secondary-button" type="button"><span class="icon icon-activity" aria-hidden="true"></span><span data-button-label>测试连接</span></button>
-            <button id="activateProfile" class="secondary-button" type="button"><span class="icon icon-play" aria-hidden="true"></span><span>设为当前</span></button>
+            <button id="activateProfile" class="secondary-button" type="button"><span class="icon icon-play" aria-hidden="true"></span><span data-button-label>设为当前</span></button>
             <button class="primary-button" type="submit"><span class="icon icon-save" aria-hidden="true"></span><span>保存</span></button>
           </div>
         </footer>
@@ -242,6 +242,10 @@
           <div class="network-listener-row">
             <div><strong>监听端口</strong><span>代理监听端口，默认 8765，保存后立即生效</span></div>
             <div class="network-port-control"><input id="proxyPort" type="number" min="1" max="65535" step="1" inputmode="numeric" aria-label="监听端口"><button id="saveProxyPort" class="primary-button" type="button"><span data-button-label>保存</span></button></div>
+          </div>
+          <div class="network-listener-row">
+            <div><strong>客户端访问主机</strong><span>Windows 本机使用 127.0.0.1；WSL2 使用 Windows 主机地址</span></div>
+            <div class="network-port-control network-host-control"><input id="clientAccessHost" type="text" autocomplete="off" spellcheck="false" aria-label="客户端访问主机"><button id="saveClientAccessHost" class="primary-button" type="button"><span data-button-label>保存</span></button></div>
           </div>
           <label class="network-listener-row network-listener-scope-row">
             <span><strong>允许 WSL2 访问</strong><span>开启后监听所有网卡，WSL2 可通过 Windows 主机地址访问；仍需携带本地访问令牌。</span></span>

@@ -1,8 +1,6 @@
 import {
   ActivateProfile,
   CheckClientConfig,
-  ConfigureClient,
-  EnableDogeToken,
   SelectDirectory,
   SetDataDirectory,
 } from "../../core/desktop-api.js";
@@ -51,13 +49,11 @@ export function createProfileActivation({ loadState, categoryLabel }) {
 
   async function performActivation(pending) {
     const button = pending?.button || null;
-    setButtonLoading(button, true, pending.tokenId ? "启用中..." : "切换中...");
+    setButtonLoading(button, true, "切换中...");
     try {
-      if (pending.tokenId) {
-        await EnableDogeToken(pending.tokenId);
-      } else {
-        await ActivateProfile(pending.profileId);
-      }
+      // configureClient 只由用户确认或已明确接管的切换路径设置；跳过时
+      // 传 false，后端不会触碰外部客户端文件。
+      await ActivateProfile(pending.profileId, pending.configureClient === true);
       await loadState();
       toast(`已切换到 ${clientCategoryLabel(pending.category)} 类别`);
     } catch (error) {
@@ -70,7 +66,7 @@ export function createProfileActivation({ loadState, categoryLabel }) {
   async function beginActivation(pending) {
     const client = clientConfigFor(pending.category);
     if (client?.skipConfigReplacement) {
-      await performActivation(pending);
+      await performActivation({ ...pending, configureClient: false });
       return;
     }
     let configured = clientIsConfigured(pending.category);
@@ -84,7 +80,8 @@ export function createProfileActivation({ loadState, categoryLabel }) {
       return;
     }
     if (configured) {
-      await performActivation(pending);
+      // 当前客户端已经由 CodexRelay 接管，切换 Profile 时同步模型等变更。
+      await performActivation({ ...pending, configureClient: true });
       return;
     }
     openClientSetupModal(pending.category, pending);
@@ -98,21 +95,13 @@ export function createProfileActivation({ loadState, categoryLabel }) {
       return;
     }
     const button = $("clientSetupConfigure");
-    if (configure) {
-      setButtonLoading(button, true, "配置中...");
-      try {
-        await ConfigureClient(category, pending.profileId || "");
-        await loadState();
-      } catch (error) {
-        toast(errorMessage(error), true);
-        setButtonLoading(button, false);
-        return;
-      } finally {
-        setButtonLoading(button, false);
-      }
-    }
     closeClientSetupModal();
-    await performActivation(pending);
+    if (configure) setButtonLoading(button, true, "配置并启用中...");
+    try {
+      await performActivation({ ...pending, configureClient: Boolean(configure), button: pending.button || (configure ? button : null) });
+    } finally {
+      if (configure) setButtonLoading(button, false);
+    }
   }
 
   async function chooseDataDirectory(event) {

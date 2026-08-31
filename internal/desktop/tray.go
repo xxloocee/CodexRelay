@@ -71,7 +71,8 @@ func setupTray(
 				entry := entry
 				item := categoryMenu.AddRadio(entry.name, entry.current)
 				item.OnClick(func(_ *application.Context) {
-					err := service.ActivateProfile(entry.profileID)
+					// 托盘只更新已经接管的客户端；未接管时仅切换本地 Profile。
+					err := service.activateProfileFromTray(entry.profileID)
 					if err != nil {
 						wailsApp.Logger.Error("托盘切换代理 API 失败", "error", err)
 					}

@@ -631,6 +631,7 @@ input[readonly]:focus { border-color: #d8dbe0; box-shadow: none; }
 .network-listener-row span { color: var(--muted); font-size: 11px; }
 .network-port-control { display: flex; align-items: center; gap: 9px; }
 .network-port-control input { width: 112px; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; color: #252b32; font-variant-numeric: tabular-nums; }
+.network-host-control input { width: 220px; }
 .network-port-control input:focus { border-color: #91c4f5; outline: 2px solid rgba(22, 135, 248, .12); }
 .network-port-control .primary-button { min-height: 36px; padding: 0 14px; }
 .settings-section { padding: 24px 0 4px; border-top: 1px solid var(--line); }

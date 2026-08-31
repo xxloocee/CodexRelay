@@ -1,11 +1,11 @@
 package desktop
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/desktop/clientconfig"
 	"codexrelay/internal/tasknotify"
 )
 
@@ -55,7 +55,7 @@ func (s *DesktopService) GetState() DesktopState {
 	}
 	proxyURLs := make(map[string]string, len(config.Categories))
 	for _, category := range config.Categories {
-		proxyURLs[category] = fmt.Sprintf("http://127.0.0.1:%d/%s", state.Config.ProxyPort, category)
+		proxyURLs[category] = clientconfig.ProxyURL(state.Config, category)
 	}
 	publicSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
 	notificationSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
@@ -96,7 +96,7 @@ func (s *DesktopService) GetState() DesktopState {
 		dogeState.LastSyncAt = state.Config.Doge.LastSyncAt.Format(time.RFC3339)
 	}
 	return DesktopState{
-		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ProxyPort: state.Config.ProxyPort, ListenOnAllInterfaces: state.Config.ListenOnAllInterfaces,
+		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ProxyPort: state.Config.ProxyPort, ListenOnAllInterfaces: state.Config.ListenOnAllInterfaces, ClientAccessHost: state.Config.ClientAccessHost,
 		ProxyURL: proxyURLs[config.CategoryCodex], ProxyURLs: proxyURLs,
 		LocalAccessToken: state.Config.LocalAccessToken, ActiveProfiles: state.Config.ActiveProfiles,
 		Profiles: profiles, FailoverOrder: config.NormalizeFailoverOrder(state.Config.FailoverOrder, state.Config.Profiles), ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,

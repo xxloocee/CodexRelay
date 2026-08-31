@@ -158,7 +158,22 @@ func tokenSwitchCurrentWasRemoved(state *relay.State, prompt *PublicDogeTokenSwi
 }
 
 func (s *DesktopService) switchProfile(category, currentID, candidateID string, allowRemovedCurrent bool) error {
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
+	remoteID, remoteCandidate := dogeTokenIDFromFailoverProfileID(candidateID)
 	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	initialIndex := config.FindProfileIndex(state.Config.Profiles, candidateID)
+	dogeCandidate := remoteCandidate || initialIndex >= 0 && state.Config.Profiles[initialIndex].Source == config.SourceDoge
+	if dogeCandidate {
+		// 已导入和待导入的二狗子候选都使用 clientConfigMu -> dogeMu。
+		// 取锁后重读目录快照，避免同步期间启用刚变为不可用的令牌。
+		s.dogeMu.Lock()
+		defer s.dogeMu.Unlock()
+		state = s.runtime.State()
+	}
 	if state == nil {
 		return errors.New("程序尚未初始化")
 	}
@@ -167,54 +182,86 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 	if !currentMatches && !currentWasRemoved {
 		return errors.New("当前代理 API 已发生变化，请重新等待下一次异常")
 	}
-	index := config.FindProfileIndex(state.Config.Profiles, candidateID)
-	candidateIsRemote := false
+	effectiveConfig := state.Config
+	index := config.FindProfileIndex(effectiveConfig.Profiles, candidateID)
+	preparedRemote := false
 	if index < 0 {
-		remoteID, ok := dogeTokenIDFromFailoverProfileID(candidateID)
-		if !ok {
+		if !remoteCandidate {
 			return errors.New("候选 Profile 不存在或类别不匹配")
 		}
-		for _, token := range state.Config.Doge.Tokens {
-			if token.ID == remoteID && token.Category == category && dogeTokenSwitchable(token, state.Config.Doge.Groups) {
-				candidateIsRemote = true
-				break
-			}
-		}
-		if !candidateIsRemote {
-			return errors.New("候选令牌当前不可用")
-		}
-		if err := s.prepareDogeTokenProfile(remoteID, false); err != nil {
+		effectiveConfig = config.Clone(state.Config)
+		var err error
+		candidateID, err = upsertDogeTokenProfile(&effectiveConfig, remoteID, true, "")
+		if err != nil {
 			return err
 		}
-		state = s.runtime.State()
-		for candidateIndex, profile := range state.Config.Profiles {
-			if profile.Source == config.SourceDoge && profile.RemoteTokenID == remoteID && profile.Category == category {
-				index = candidateIndex
-				candidateID = profile.ID
-				break
-			}
-		}
+		index = config.FindProfileIndex(effectiveConfig.Profiles, candidateID)
+		preparedRemote = true
 	}
-	if index < 0 || state.Config.Profiles[index].Category != category {
+	if index < 0 || effectiveConfig.Profiles[index].Category != category {
 		return errors.New("候选 Profile 不存在或类别不匹配")
 	}
-	candidate := state.Config.Profiles[index]
-	if !failoverProfileAvailable(state.Config, candidate) {
+	candidate := effectiveConfig.Profiles[index]
+	if !failoverProfileAvailable(effectiveConfig, candidate) {
 		return errors.New("候选 Profile 当前不可用")
 	}
 	clientEntry := state.Config.ClientConfigs[category]
+	var configResult clientconfig.ConfigureResult
+	clientConfigRendered := false
+	// 自动故障切换只能更新已经明确由 CodexRelay 接管的文件；未接管的
+	// 客户端必须等待用户在切换提示中确认，避免后台任务擅自接管外部配置。
 	if clientconfig.Supports(category) && !clientEntry.SkipConfigReplacement {
-		if err := clientconfig.Configure(state.Config, category, candidate.ID); err != nil {
-			return fmt.Errorf("更新客户端配置失败: %w", err)
+		status, inspectErr := clientconfig.Inspect(state.Config, category)
+		if inspectErr != nil {
+			return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
+		}
+		if status.Status == "error" {
+			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
+		}
+		if status.Configured {
+			var err error
+			configResult, err = clientconfig.ConfigureWithResult(effectiveConfig, category, candidate.ID)
+			if err != nil {
+				return fmt.Errorf("更新客户端配置失败: %w", err)
+			}
+			clientConfigRendered = true
 		}
 	}
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		currentMatches := cfg.ActiveProfiles[category] == currentID
 		currentWasRemoved := allowRemovedCurrent && cfg.ActiveProfiles[category] == "" && config.FindProfileIndex(cfg.Profiles, currentID) < 0
 		if !currentMatches && !currentWasRemoved {
 			return errors.New("当前代理 API 已发生变化，请重新等待下一次异常")
 		}
+		if preparedRemote {
+			committedID, commitErr := upsertDogeTokenProfile(cfg, remoteID, true, candidate.ID)
+			if commitErr != nil {
+				return commitErr
+			}
+			if committedID != candidate.ID {
+				return errors.New("候选代理 API 已被并发修改，请重新切换")
+			}
+		}
+		committedIndex := config.FindProfileIndex(cfg.Profiles, candidate.ID)
+		if committedIndex < 0 || cfg.Profiles[committedIndex].Category != category {
+			return errors.New("候选 Profile 不存在或类别不匹配")
+		}
+		committedCandidate := cfg.Profiles[committedIndex]
+		if !failoverProfileAvailable(*cfg, committedCandidate) {
+			return errors.New("候选 Profile 当前不可用")
+		}
+		if clientConfigRendered && !sameClientRenderedProfile(candidate, committedCandidate) {
+			return errors.New("候选 Profile 的客户端配置字段已被并发修改，请重新切换")
+		}
 		cfg.ActiveProfiles[category] = candidate.ID
 		return nil
-	})
+	}); err != nil {
+		if configResult.Rollback != nil {
+			if rollbackErr := configResult.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("切换代理 API 失败: %v；外部配置回退失败: %w", err, rollbackErr)
+			}
+		}
+		return err
+	}
+	return nil
 }

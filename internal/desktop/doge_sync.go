@@ -48,10 +48,21 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 	defer s.setDogeSyncing(true, false)
 	defer s.setDogeSyncPhase("")
 	s.dogeMu.Lock()
-	defer s.dogeMu.Unlock()
+	directorySwitches, err := s.syncDogeLocked(ctx, accessToken, replaceToken, mode)
+	s.dogeMu.Unlock()
+	if err != nil {
+		return err
+	}
+	// 自动故障切换可能进入客户端配置事务并再次读取二狗子目录，必须在
+	// 释放 dogeMu 后执行，避免目录同步与 Profile 准备互相等待。
+	s.setDogeDirectorySwitchContexts(directorySwitches)
+	return nil
+}
+
+func (s *DesktopService) syncDogeLocked(ctx context.Context, accessToken string, replaceToken bool, mode dogeSyncMode) (map[string]*tokenSwitchContext, error) {
 	state := s.runtime.State()
 	if state == nil {
-		return errors.New("程序尚未初始化")
+		return nil, errors.New("程序尚未初始化")
 	}
 	if !replaceToken {
 		accessToken = state.Config.Doge.AccessToken
@@ -69,13 +80,13 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 	client, err := s.newDogeHTTPClient()
 	if err != nil {
 		_ = s.recordDogeSyncError(err.Error())
-		return err
+		return nil, err
 	}
 	defer client.CloseIdleConnections()
 	data, announcements, err := s.fetchDogeData(ctx, baseURL, accessToken, previousTokens, mode, client)
 	if err != nil {
 		_ = s.recordDogeSyncError(err.Error())
-		return err
+		return nil, err
 	}
 	directorySwitches := make(map[string]*tokenSwitchContext)
 	if !replaceToken {
@@ -94,10 +105,9 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 		}
 	}
 	if err := s.saveDogeData(data, announcements, baseURL, accessToken, previousOrder); err != nil {
-		return err
+		return nil, err
 	}
-	s.setDogeDirectorySwitchContexts(directorySwitches)
-	return nil
+	return directorySwitches, nil
 }
 
 func dogeTokenDirectoryContains(tokens []config.DogeToken, remoteTokenID int64) bool {

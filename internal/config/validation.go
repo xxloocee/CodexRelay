@@ -13,8 +13,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
+	"unicode"
 
 	"codexrelay/internal/network"
 )
@@ -40,6 +43,12 @@ func Validate(cfg AppConfig) error {
 	}
 	if cfg.ClientConfigs == nil {
 		return errors.New("clientConfigs 必须是 JSON 对象")
+	}
+	if err := ValidateClientAccessHost(cfg.ClientAccessHost); err != nil {
+		return err
+	}
+	if !cfg.ListenOnAllInterfaces && !IsLoopbackClientAccessHost(cfg.ClientAccessHost) {
+		return errors.New("仅监听本机时，客户端访问主机必须是 127.0.0.1 或 localhost")
 	}
 	if err := network.Validate(cfg.Network, cfg.ProxyPort); err != nil {
 		return err
@@ -79,11 +88,64 @@ func Validate(cfg AppConfig) error {
 		if !IsCategory(category) {
 			return fmt.Errorf("客户端配置包含未知 API 类别 %q", category)
 		}
+		if err := ValidateClientConfig(category, cfg.ClientConfigs[category]); err != nil {
+			return fmt.Errorf("客户端 %q 配置无效: %w", category, err)
+		}
 	}
 	if err := ValidateFailoverOrder(cfg.FailoverOrder, cfg.Profiles); err != nil {
 		return err
 	}
 	return nil
+}
+
+// NormalizeClientAccessHost 规范写入外部客户端的主机名。该字段不包含协议、
+// 端口和路径，端口与类别路径始终由 CodexRelay 当前配置生成。
+func NormalizeClientAccessHost(raw string) (string, error) {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if err := ValidateClientAccessHost(host); err != nil {
+		return "", err
+	}
+	return host, nil
+}
+
+func ValidateClientAccessHost(raw string) error {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return errors.New("客户端访问主机不能为空")
+	}
+	if host != raw || len(host) > 253 || strings.ContainsAny(host, "\x00\r\n/\\?#@[]") {
+		return errors.New("客户端访问主机格式无效")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() == nil {
+			return errors.New("客户端访问主机必须是 IPv4 地址或主机名")
+		}
+		return nil
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return errors.New("客户端访问主机格式无效")
+		}
+		for _, r := range label {
+			if !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+				return errors.New("客户端访问主机格式无效")
+			}
+		}
+	}
+	return nil
+}
+
+// IsLoopbackClientAccessHost reports whether an access host is reachable while
+// the proxy only listens on the local loopback interface.
+func IsLoopbackClientAccessHost(raw string) bool {
+	host := strings.TrimSpace(raw)
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	return host == "127.0.0.1"
 }
 
 // ValidateTokenSwitch 校验通用故障切换模式、触发阈值和时间窗口。
@@ -289,6 +351,9 @@ func ValidateProfile(profile Profile) error {
 	if u.User != nil {
 		return errors.New("API 地址不能包含用户名或密码")
 	}
+	if err := ValidateAPIKey(profile.APIKey); err != nil {
+		return err
+	}
 	for headerName, value := range profile.Headers {
 		if strings.TrimSpace(headerName) == "" || strings.ContainsAny(headerName, "\r\n") {
 			return errors.New("额外请求头名称无效")
@@ -302,6 +367,66 @@ func ValidateProfile(profile Profile) error {
 	}
 	if err := ValidateModels(profile.Models, profile.DefaultModel); err != nil {
 		return err
+	}
+	return nil
+}
+
+// ValidateAPIKey 校验供应商密钥可以安全地进入请求头和本地配置文件。
+// 不限制密钥前缀，以兼容不同的同协议供应商；仅拒绝控制字符并限制长度。
+func ValidateAPIKey(raw string) error {
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return errors.New("API 密钥不能为空")
+	}
+	if len([]rune(key)) > 4096 {
+		return errors.New("API 密钥长度不能超过 4096 个字符")
+	}
+	for _, r := range key {
+		if unicode.IsControl(r) {
+			return errors.New("API 密钥不能包含控制字符")
+		}
+	}
+	return nil
+}
+
+// ValidateClientConfig 校验外部客户端配置目标。每个类别只允许其适配器
+// 约定的一个固定文件名；目录可以由用户选择，但必须是绝对路径，且不得
+// 通过文件名字段跳出目录或覆盖其他文件。
+func ValidateClientConfig(category string, client ClientConfig) error {
+	if !IsCategory(category) {
+		return fmt.Errorf("客户端类别无效: %q", category)
+	}
+	directory := strings.TrimSpace(client.ConfigDir)
+	if directory != "" {
+		if directory != client.ConfigDir {
+			return errors.New("客户端配置目录不能包含首尾空白字符")
+		}
+		if strings.ContainsAny(directory, "\x00\r\n") {
+			return errors.New("客户端配置目录包含非法字符")
+		}
+		if !filepath.IsAbs(directory) {
+			return errors.New("客户端配置目录必须是绝对路径")
+		}
+		if filepath.Clean(directory) == "." {
+			return errors.New("客户端配置目录无效")
+		}
+	}
+	filename := strings.TrimSpace(client.ConfigFile)
+	if filename != client.ConfigFile {
+		return errors.New("客户端配置文件名不能包含首尾空白字符")
+	}
+	if filename == "" {
+		return nil
+	}
+	if strings.ContainsAny(filename, "\\/\x00\r\n") || filename == "." || filename == ".." || filepath.Base(filename) != filename {
+		return errors.New("客户端配置文件名必须是单一文件名")
+	}
+	expected, supported := ClientConfigFileFor(category)
+	if !supported || filename != expected {
+		if supported {
+			return fmt.Errorf("客户端配置文件必须是 %q", expected)
+		}
+		return errors.New("该 API 类别不支持外部配置文件")
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/desktop/clientconfig"
 	"codexrelay/internal/network"
 	"codexrelay/internal/platform"
 )
@@ -28,6 +29,8 @@ func (s *DesktopService) SetNetwork(input network.Settings) error {
 // SetProxyPort 校验并热切换本地代理监听端口；新端口无法绑定时不修改配置和现有监听。
 // 端口范围为 TCP 的 1-65535；成功后新请求地址立即使用新端口，已有连接由旧服务优雅退出。
 func (s *DesktopService) SetProxyPort(port int) error {
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
 	if port < 1 || port > 65535 {
 		return errors.New("监听端口必须是 1 到 65535 之间的整数")
 	}
@@ -42,16 +45,34 @@ func (s *DesktopService) SetProxyPort(port int) error {
 	if err != nil {
 		return err
 	}
+	nextConfig := state.Config
+	nextConfig.ProxyPort = port
+	clientResults, err := syncManagedClientConfigs(state.Config, nextConfig)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		cfg.ProxyPort = port
 		return nil
 	}); err != nil {
 		_ = listener.Close()
+		if rollbackErr := rollbackClientConfigs(clientResults); rollbackErr != nil {
+			return fmt.Errorf("保存监听端口失败: %v；客户端配置回退失败: %w", err, rollbackErr)
+		}
 		return err
 	}
 	if !s.installProxyListener(server, listener) {
+		restoreConfigErr := s.updateConfig(func(cfg *config.AppConfig) error {
+			cfg.ProxyPort = state.Config.ProxyPort
+			return nil
+		})
+		rollbackErr := rollbackClientConfigs(clientResults)
 		_ = listener.Close()
-		return nil
+		if restoreConfigErr != nil || rollbackErr != nil {
+			return fmt.Errorf("代理监听切换失败；本地配置恢复错误: %v；客户端配置回退错误: %v", restoreConfigErr, rollbackErr)
+		}
+		return errors.New("代理监听切换失败，已恢复原配置")
 	}
 	return nil
 }
@@ -59,12 +80,17 @@ func (s *DesktopService) SetProxyPort(port int) error {
 // SetProxyListenAllInterfaces 切换透明代理是否监听所有 IPv4 网卡；绑定失败时保留原配置和监听。
 // 开启后 WSL2 可通过 Windows 主机地址访问，但所有请求仍须通过本地访问令牌认证。
 func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("代理尚未初始化")
 	}
 	if state.Config.ListenOnAllInterfaces == enabled {
 		return nil
+	}
+	if !enabled && !config.IsLoopbackClientAccessHost(state.Config.ClientAccessHost) {
+		return errors.New("当前客户端访问主机不是回环地址，请先改回回环地址后再关闭允许 WSL2 访问")
 	}
 	listener, server, err := s.prepareProxyListener(state.Config.ProxyPort, enabled)
 	if err != nil {
@@ -78,9 +104,107 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 		return err
 	}
 	if !s.installProxyListener(server, listener) {
+		restoreConfigErr := s.updateConfig(func(cfg *config.AppConfig) error {
+			cfg.ListenOnAllInterfaces = state.Config.ListenOnAllInterfaces
+			return nil
+		})
 		_ = listener.Close()
+		if restoreConfigErr != nil {
+			return fmt.Errorf("代理监听切换失败；本地配置恢复错误: %v", restoreConfigErr)
+		}
+		return errors.New("代理监听切换失败，已恢复原配置")
 	}
 	return nil
+}
+
+// syncManagedClientConfigs updates only clients whose current file is already
+// configured for CodexRelay. It uses the prospective network settings while
+// preserving the current settings for the status check, so changing a port or
+// listen scope cannot silently take over an unrelated client configuration.
+func syncManagedClientConfigs(previous, next config.AppConfig) ([]clientconfig.ConfigureResult, error) {
+	results := make([]clientconfig.ConfigureResult, 0)
+	for _, category := range config.Categories {
+		if !clientconfig.Supports(category) {
+			continue
+		}
+		entry := previous.ClientConfigs[category]
+		if entry.SkipConfigReplacement || (strings.TrimSpace(previous.ActiveProfiles[category]) == "" && clientconfig.RequiresProfile(category)) {
+			continue
+		}
+		status, err := clientconfig.Inspect(previous, category)
+		if err != nil {
+			return nil, clientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %w", category, err), results)
+		}
+		if status.Status == "error" {
+			return nil, clientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %s", category, status.Error), results)
+		}
+		if !status.Configured {
+			continue
+		}
+		result, err := clientconfig.ConfigureWithResult(next, category, next.ActiveProfiles[category])
+		if err != nil {
+			if rollbackErr := rollbackClientConfigs(results); rollbackErr != nil {
+				return nil, fmt.Errorf("同步 %s 客户端配置失败: %v；此前客户端配置回退失败: %w", category, err, rollbackErr)
+			}
+			return nil, fmt.Errorf("同步 %s 客户端配置失败: %w", category, err)
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+// SetClientAccessHost 更新写入外部客户端的访问主机。监听端口和类别路径由
+// config.json 的其他字段生成；已接管客户端在本地保存成功前统一同步并可回退。
+func (s *DesktopService) SetClientAccessHost(raw string) error {
+	host, err := config.NormalizeClientAccessHost(raw)
+	if err != nil {
+		return err
+	}
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	if state.Config.ClientAccessHost == host {
+		return nil
+	}
+	if !state.Config.ListenOnAllInterfaces && !config.IsLoopbackClientAccessHost(host) {
+		return errors.New("代理仅监听本机时，客户端访问主机必须是回环地址；如需使用局域网地址，请先开启允许 WSL2 访问")
+	}
+	next := state.Config
+	next.ClientAccessHost = host
+	results, err := syncManagedClientConfigs(state.Config, next)
+	if err != nil {
+		return err
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		cfg.ClientAccessHost = host
+		return nil
+	}); err != nil {
+		return clientConfigRollbackError(fmt.Errorf("保存客户端访问主机失败: %w", err), results)
+	}
+	return nil
+}
+
+func rollbackClientConfigs(results []clientconfig.ConfigureResult) error {
+	var firstErr error
+	for index := len(results) - 1; index >= 0; index-- {
+		if results[index].Rollback == nil {
+			continue
+		}
+		if err := results[index].Rollback(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func clientConfigRollbackError(original error, results []clientconfig.ConfigureResult) error {
+	if rollbackErr := rollbackClientConfigs(results); rollbackErr != nil {
+		return fmt.Errorf("%v；此前客户端配置回退失败: %w", original, rollbackErr)
+	}
+	return original
 }
 
 func (s *DesktopService) SetPreferences(input config.Preferences) error {

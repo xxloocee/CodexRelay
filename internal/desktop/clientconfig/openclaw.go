@@ -18,12 +18,22 @@ import (
 )
 
 func configureOpenClaw(path, endpoint, key string, catalog []config.ModelEntry, defaultModel string) error {
-	if err := backupClientFile(path); err != nil {
-		return err
+	_, err := configureSingleResult(path, func(existing []byte) ([]byte, error) {
+		return renderOpenClaw(existing, endpoint, key, catalog, defaultModel)
+	})
+	return err
+}
+
+func renderOpenClaw(existing []byte, endpoint, key string, catalog []config.ModelEntry, defaultModel string) ([]byte, error) {
+	if err := validateExternalValue("代理地址", endpoint); err != nil {
+		return nil, err
 	}
-	value, err := readJSONObject(path)
+	if err := validateExternalValue("访问令牌", key); err != nil {
+		return nil, err
+	}
+	value, err := readJSONObjectData(existing)
 	if err != nil {
-		return fmt.Errorf("解析 OpenClaw JSON/JSON5 配置失败，请手动配置: %w", err)
+		return nil, fmt.Errorf("解析 OpenClaw JSON/JSON5 配置失败，请手动配置: %w", err)
 	}
 	modelRoot, ok := value["models"].(map[string]any)
 	if !ok {
@@ -35,7 +45,15 @@ func configureOpenClaw(path, endpoint, key string, catalog []config.ModelEntry, 
 		providers = map[string]any{}
 		modelRoot["providers"] = providers
 	}
-	provider := map[string]any{"baseUrl": endpoint, "api": "openai-completions", "apiKey": key}
+	// Merge into an existing provider so a profile without a cached model
+	// catalog never erases models previously configured by the user.
+	provider, _ := providers["codexrelay"].(map[string]any)
+	if provider == nil {
+		provider = map[string]any{}
+	}
+	provider["baseUrl"] = endpoint
+	provider["api"] = "openai-completions"
+	provider["apiKey"] = key
 	if len(catalog) > 0 {
 		modelEntries := make([]any, 0, len(catalog))
 		for _, model := range catalog {
@@ -77,9 +95,36 @@ func configureOpenClaw(path, endpoint, key string, catalog []config.ModelEntry, 
 			allowedModels = map[string]any{}
 			defaults["models"] = allowedModels
 		}
+		for id := range allowedModels {
+			if strings.HasPrefix(id, "codexrelay/") {
+				delete(allowedModels, id)
+			}
+		}
 		for _, model := range catalog {
 			allowedModels["codexrelay/"+model.ID] = map[string]any{}
 		}
+	} else if catalog != nil {
+		delete(provider, "models")
+		if agents, ok := value["agents"].(map[string]any); ok {
+			if defaults, ok := agents["defaults"].(map[string]any); ok {
+				if modelConfig, ok := defaults["model"].(map[string]any); ok {
+					if primary, ok := modelConfig["primary"].(string); ok && strings.HasPrefix(primary, "codexrelay/") {
+						delete(modelConfig, "primary")
+					}
+				}
+				if allowedModels, ok := defaults["models"].(map[string]any); ok {
+					for id := range allowedModels {
+						if strings.HasPrefix(id, "codexrelay/") {
+							delete(allowedModels, id)
+						}
+					}
+				}
+			}
+		}
 	}
-	return writeJSONObject(path, value)
+	data, err := marshalJSONObject(value)
+	if err != nil {
+		return nil, fmt.Errorf("编码 OpenClaw 配置失败: %w", err)
+	}
+	return data, nil
 }

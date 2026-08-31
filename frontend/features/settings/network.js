@@ -1,11 +1,11 @@
-import { SetDogeBaseURL, SetNetwork, SetProxyListenAllInterfaces, SetProxyPort } from "../../core/desktop-api.js";
+import { SetClientAccessHost, SetDogeBaseURL, SetNetwork, SetProxyListenAllInterfaces, SetProxyPort } from "../../core/desktop-api.js";
 import { $ } from "../../core/dom.js";
 import { errorMessage, setButtonLoading, toast } from "../../core/feedback.js";
 import { drafts, serverState } from "../../core/store.js";
 
 export function createNetwork({ loadState }) {
   function renderNetworkDraftState() {
-    const preserveDraft = drafts.networkModeDirty || drafts.networkProxyDirty || drafts.networkPortDirty || drafts.networkListenDirty;
+    const preserveDraft = drafts.networkModeDirty || drafts.networkProxyDirty || drafts.networkPortDirty || drafts.networkHostDirty || drafts.networkListenDirty;
     if (!preserveDraft) {
       document.querySelectorAll("#networkModes button").forEach((button) => {
         button.classList.toggle("active", button.dataset.mode === serverState.snapshot.network.mode);
@@ -13,6 +13,7 @@ export function createNetwork({ loadState }) {
       $("manualProxyRow").classList.toggle("hidden", serverState.snapshot.network.mode !== "manual");
       $("manualProxy").value = serverState.snapshot.network.proxyUrl || "";
       $("proxyPort").value = String(serverState.snapshot.proxyPort || 8765);
+      $("clientAccessHost").value = serverState.snapshot.clientAccessHost || "127.0.0.1";
       $("listenOnAllInterfaces").checked = Boolean(serverState.snapshot.listenOnAllInterfaces);
     }
   }
@@ -84,6 +85,28 @@ export function createNetwork({ loadState }) {
     }
   }
 
+  async function saveClientAccessHost() {
+    const input = $("clientAccessHost");
+    const button = $("saveClientAccessHost");
+    const host = input.value.trim();
+    if (!host) {
+      toast("客户端访问主机不能为空", true);
+      input.focus();
+      return;
+    }
+    setButtonLoading(button, true, "保存中...");
+    try {
+      await SetClientAccessHost(host);
+      drafts.networkHostDirty = false;
+      await loadState();
+      toast("客户端访问地址已更新");
+    } catch (error) {
+      toast(errorMessage(error), true);
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
   async function saveDogeBaseURL() {
     const input = $("dogeBaseURL");
     const baseURL = input.value.trim();
@@ -139,9 +162,11 @@ export function createNetwork({ loadState }) {
       drafts.networkPortDirty = true;
       drafts.networkDraftRevision += 1;
     });
+    $("clientAccessHost").addEventListener("input", () => { drafts.networkHostDirty = true; });
     $("listenOnAllInterfaces").addEventListener("change", () => setProxyListenAllInterfaces($("listenOnAllInterfaces").checked));
     $("saveNetwork").addEventListener("click", () => saveNetwork());
     $("saveProxyPort").addEventListener("click", saveProxyPort);
+    $("saveClientAccessHost").addEventListener("click", saveClientAccessHost);
     $("dogeBaseURL").addEventListener("input", () => { drafts.dogeBaseURLDirty = true; });
     $("saveDogeBaseURL").addEventListener("click", saveDogeBaseURL);
   }

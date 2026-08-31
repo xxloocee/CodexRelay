@@ -14,24 +14,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"codexrelay/internal/config"
 )
 
 func configureGeminiSettings(path string) error {
-	if !pathExists(path) {
-		return nil
-	}
-	if err := backupClientFile(path); err != nil {
+	data, err := renderGeminiSettings(path)
+	if err != nil || data == nil {
 		return err
 	}
-	value := map[string]any{}
+	_, err = applyConfigChanges([]ConfigFileChange{{Path: path, Data: data}})
+	return err
+}
+
+func renderGeminiSettings(path string) ([]byte, error) {
+	if !pathExists(path) {
+		return nil, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("读取 Gemini settings.json 失败: %w", err)
+		return nil, fmt.Errorf("读取 Gemini settings.json 失败: %w", err)
 	}
+	return renderGeminiSettingsData(data)
+}
+
+func renderGeminiSettingsData(data []byte) ([]byte, error) {
+	value := map[string]any{}
 	if err := json.Unmarshal(data, &value); err != nil {
-		return fmt.Errorf("解析 Gemini settings.json 失败，请手动配置: %w", err)
+		return nil, fmt.Errorf("解析 Gemini settings.json 失败，请手动配置: %w", err)
 	}
 	security, ok := value["security"].(map[string]any)
 	if !ok {
@@ -46,15 +57,36 @@ func configureGeminiSettings(path string) error {
 	auth["selectedType"] = "gemini-api-key"
 	encoded, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
-		return fmt.Errorf("编码 Gemini settings.json 失败: %w", err)
+		return nil, fmt.Errorf("编码 Gemini settings.json 失败: %w", err)
 	}
-	return writeClientFile(path, append(encoded, '\n'))
+	return append(encoded, '\n'), nil
 }
 
 // configureGemini 保持 .env 和 settings.json 的写入顺序与原适配器一致。
 func configureGemini(directory, file, endpoint, key string, models []config.ModelEntry, defaultModel string) error {
-	if err := configureDotEnvWithModel(file, endpoint, key, "GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", models, defaultModel); err != nil {
-		return err
+	_, err := configureGeminiResult(directory, file, endpoint, key, models, defaultModel)
+	return err
+}
+
+func configureGeminiResult(directory, file, endpoint, key string, models []config.ModelEntry, defaultModel string) (ConfigureResult, error) {
+	envPath := file
+	if directory != "" {
+		envPath = filepath.Join(directory, ".env")
 	}
-	return configureGeminiSettings(directory + string(os.PathSeparator) + "settings.json")
+	settingsPath := filepath.Join(directory, "settings.json")
+	return applyConfigTransaction([]string{envPath, settingsPath}, func(snapshots map[string]configFileSnapshot) ([]ConfigFileChange, error) {
+		envData, err := renderDotEnvData(snapshots[envPath].data, endpoint, key, "GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", models, defaultModel)
+		if err != nil {
+			return nil, err
+		}
+		changes := []ConfigFileChange{{Path: envPath, Data: envData}}
+		if snapshots[settingsPath].existed {
+			settingsData, err := renderGeminiSettingsData(snapshots[settingsPath].data)
+			if err != nil {
+				return nil, err
+			}
+			changes = append(changes, ConfigFileChange{Path: settingsPath, Data: settingsData})
+		}
+		return changes, nil
+	})
 }

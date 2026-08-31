@@ -15,6 +15,7 @@ type DesktopState struct {
 	ProxyPort       int    `json:"proxyPort"`
 	// ListenOnAllInterfaces 是网络设置页展示的监听范围，不代表当前出站网络出口。
 	ListenOnAllInterfaces bool                       `json:"listenOnAllInterfaces"`
+	ClientAccessHost      string                     `json:"clientAccessHost"`
 	ProxyURL              string                     `json:"proxyUrl"`
 	ProxyURLs             map[string]string          `json:"proxyUrls"`
 	LocalAccessToken      string                     `json:"localAccessToken"`
@@ -203,20 +204,25 @@ type DogeTokenCategoryInput struct {
 }
 
 type PublicProfile struct {
-	ID             string            `json:"id"`
-	Source         string            `json:"source"`
-	Category       string            `json:"category"`
-	Name           string            `json:"name"`
-	BaseURL        string            `json:"baseUrl"`
-	APIKey         string            `json:"apiKey"`
-	Note           string            `json:"note,omitempty"`
-	Headers        map[string]string `json:"headers"`
-	Models         []PublicModel     `json:"models"`
-	DefaultModel   string            `json:"defaultModel"`
-	Active         bool              `json:"active"`
-	PreviewURL     string            `json:"previewUrl"`
-	RemoteTokenID  int64             `json:"remoteTokenId,omitempty"`
-	SkipAutoSwitch bool              `json:"skipAutoSwitch"`
+	ID       string `json:"id"`
+	Source   string `json:"source"`
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"baseUrl"`
+	// APIKey 始终为空，保留字段是为了兼容已有 Wails/前端模型；完整密钥只在
+	// 后端配置中保存，不再通过状态快照下发。编辑已有 Profile 时提交空值表示
+	// 保留原密钥，新增 Profile 仍必须提交完整密钥。
+	APIKey           string            `json:"apiKey"`
+	APIKeyConfigured bool              `json:"apiKeyConfigured"`
+	APIKeyHint       string            `json:"apiKeyHint,omitempty"`
+	Note             string            `json:"note,omitempty"`
+	Headers          map[string]string `json:"headers"`
+	Models           []PublicModel     `json:"models"`
+	DefaultModel     string            `json:"defaultModel"`
+	Active           bool              `json:"active"`
+	PreviewURL       string            `json:"previewUrl"`
+	RemoteTokenID    int64             `json:"remoteTokenId,omitempty"`
+	SkipAutoSwitch   bool              `json:"skipAutoSwitch"`
 }
 
 // PublicModel 是编辑页模型管理器展示的模型摘要，不包含密钥或请求正文。
@@ -236,12 +242,13 @@ type ModelInput struct {
 }
 
 type ProfileInput struct {
-	ID           string            `json:"id"`
-	Source       string            `json:"source"`
-	Category     string            `json:"category"`
-	Name         string            `json:"name"`
-	BaseURL      string            `json:"baseUrl"`
-	APIKey       string            `json:"apiKey"`
+	ID       string `json:"id"`
+	Source   string `json:"source"`
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"baseUrl"`
+	// APIKey 为空时表示编辑场景下保留已有密钥；新增 Profile 必须填写完整密钥。
+	APIKey       string            `json:"apiKey,omitempty"`
 	Note         string            `json:"note"`
 	Headers      map[string]string `json:"headers"`
 	Models       []ModelInput      `json:"models"`

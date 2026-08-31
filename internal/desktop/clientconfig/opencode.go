@@ -18,23 +18,41 @@ import (
 )
 
 func configureOpenCode(path, endpoint, key string, models []config.ModelEntry, defaultModel string) error {
-	if err := backupClientFile(path); err != nil {
-		return err
+	_, err := configureSingleResult(path, func(existing []byte) ([]byte, error) {
+		return renderOpenCode(existing, endpoint, key, models, defaultModel)
+	})
+	return err
+}
+
+func renderOpenCode(existing []byte, endpoint, key string, models []config.ModelEntry, defaultModel string) ([]byte, error) {
+	if err := validateExternalValue("代理地址", endpoint); err != nil {
+		return nil, err
 	}
-	value, err := readJSONObject(path)
+	if err := validateExternalValue("访问令牌", key); err != nil {
+		return nil, err
+	}
+	value, err := readJSONObjectData(existing)
 	if err != nil {
-		return fmt.Errorf("解析 OpenCode 配置失败，请手动配置: %w", err)
+		return nil, fmt.Errorf("解析 OpenCode 配置失败，请手动配置: %w", err)
 	}
 	providers, ok := value["provider"].(map[string]any)
 	if !ok {
 		providers = map[string]any{}
 		value["provider"] = providers
 	}
-	provider := map[string]any{
-		"npm":     "@ai-sdk/openai-compatible",
-		"name":    "CodexRelay",
-		"options": map[string]any{"baseURL": endpoint, "apiKey": key},
+	provider, _ := providers["codexrelay"].(map[string]any)
+	if provider == nil {
+		provider = map[string]any{}
 	}
+	provider["npm"] = "@ai-sdk/openai-compatible"
+	provider["name"] = "CodexRelay"
+	options, _ := provider["options"].(map[string]any)
+	if options == nil {
+		options = map[string]any{}
+		provider["options"] = options
+	}
+	options["baseURL"] = endpoint
+	options["apiKey"] = key
 	if len(models) > 0 {
 		modelMap := map[string]any{}
 		for _, model := range models {
@@ -45,7 +63,22 @@ func configureOpenCode(path, endpoint, key string, models []config.ModelEntry, d
 			modelMap[model.ID] = map[string]any{"name": name}
 		}
 		provider["models"] = modelMap
+	} else if models != nil {
+		delete(provider, "models")
 	}
 	providers["codexrelay"] = provider
-	return writeJSONObject(path, value)
+	if selected := selectedModelID(models, defaultModel); selected != "" {
+		// OpenCode selects the active provider/model through the root model key;
+		// registering models alone leaves an existing provider active.
+		value["model"] = "codexrelay/" + selected
+	} else if models != nil {
+		if model, ok := value["model"].(string); ok && strings.HasPrefix(model, "codexrelay/") {
+			delete(value, "model")
+		}
+	}
+	data, err := marshalJSONObject(value)
+	if err != nil {
+		return nil, fmt.Errorf("编码 OpenCode 配置失败: %w", err)
+	}
+	return data, nil
 }

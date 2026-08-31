@@ -57,11 +57,15 @@ func (s *DesktopService) installProxyListener(server *http.Server, listener net.
 	s.mu.Unlock()
 	s.serveProxy(server, listener)
 	if oldServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := oldServer.Shutdown(ctx); err != nil {
-			application.Get().Logger.Error("旧监听端口关闭失败", "error", err)
-		}
-		cancel()
+		// 不在配置事务锁内等待旧请求结束；请求完成后的健康回调可能还要
+		// 进入故障切换并获取同一把锁。新监听已就绪，旧服务异步优雅退出。
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := oldServer.Shutdown(ctx); err != nil {
+				application.Get().Logger.Error("旧监听端口关闭失败", "error", err)
+			}
+		}()
 	} else if oldListener != nil {
 		_ = oldListener.Close()
 	}
