@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -122,6 +123,116 @@ func dogeContainsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func dogeTokenUpdatePayload(token config.DogeToken, group string) map[string]any {
+	return map[string]any{
+		"id":                   token.ID,
+		"status":               token.Status,
+		"name":                 token.Name,
+		"expired_time":         token.ExpiredTime,
+		"remain_quota":         token.RemainQuota,
+		"unlimited_quota":      token.UnlimitedQuota,
+		"model_limits_enabled": token.ModelLimitsEnabled,
+		"model_limits":         token.ModelLimits,
+		"allow_ips":            token.AllowIPs,
+		"group":                group,
+		"cross_group_retry":    token.CrossGroupRetry,
+	}
+}
+
+// updateDogeTokenGroup 使用上游实时令牌详情构造更新请求，远端成功前不写入本地目录。
+// 更新接口会覆写多个字段，因此只能在读取最新详情后替换 group。
+func (s *DesktopService) updateDogeTokenGroup(id int64, group string) error {
+	s.dogeMu.Lock()
+	defer s.dogeMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	if strings.TrimSpace(state.Config.Doge.AccessToken) == "" {
+		return errors.New("请先绑定二狗子访问令牌")
+	}
+	if !dogeContainsString(state.Config.Doge.Groups, group) {
+		return errors.New("所选远端分组当前不可用，请先刷新目录")
+	}
+	var localToken config.DogeToken
+	for _, candidate := range state.Config.Doge.Tokens {
+		if candidate.ID == id {
+			localToken = candidate
+			break
+		}
+	}
+	if localToken.ID == 0 {
+		return errors.New("二狗子令牌不存在，请先刷新目录")
+	}
+	baseURL := strings.TrimSpace(state.Config.Doge.BaseURL)
+	if baseURL == "" {
+		baseURL = defaultDogeBaseURL
+	}
+	client, err := s.newDogeHTTPClient()
+	if err != nil {
+		return err
+	}
+	defer client.CloseIdleConnections()
+	remoteToken, err := s.fetchDogeToken(context.Background(), client, baseURL, state.Config.Doge.AccessToken, id)
+	if err != nil {
+		return fmt.Errorf("读取最新 API 密钥详情失败: %w", err)
+	}
+	updatedToken := remoteToken
+	if remoteToken.Group != group {
+		data, err := s.dogeRequestJSONWithClient(context.Background(), client, baseURL, state.Config.Doge.AccessToken, http.MethodPut, "/api/token/", dogeTokenUpdatePayload(remoteToken, group), "")
+		if err != nil {
+			if dogeCreateRequestWasRejected(err) {
+				return err
+			}
+			return fmt.Errorf("API 密钥分组修改结果未知，请先手动同步确认: %w", err)
+		}
+		var response dogeTokenResponse
+		if err := json.Unmarshal(data, &response); err != nil || response.ID != id {
+			updatedToken = remoteToken
+			updatedToken.Group = group
+		} else {
+			updatedToken = dogeTokenFromResponse(response)
+		}
+	}
+	updatedToken.Key = localToken.Key
+	updatedToken.Category = localToken.Category
+	updatedToken.Note = localToken.Note
+	updatedToken.GroupDisplayName = strings.TrimSpace(state.Config.Doge.GroupDisplayNames[updatedToken.Group])
+	if updatedToken.GroupDisplayName == "" {
+		updatedToken.GroupDisplayName = updatedToken.Group
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		for index := range cfg.Doge.Tokens {
+			if cfg.Doge.Tokens[index].ID != id {
+				continue
+			}
+			updatedToken.Key = cfg.Doge.Tokens[index].Key
+			updatedToken.Category = cfg.Doge.Tokens[index].Category
+			updatedToken.Note = cfg.Doge.Tokens[index].Note
+			updatedToken.GroupDisplayName = strings.TrimSpace(cfg.Doge.GroupDisplayNames[updatedToken.Group])
+			if updatedToken.GroupDisplayName == "" {
+				updatedToken.GroupDisplayName = updatedToken.Group
+			}
+			updatedToken.GroupRatio = dogeGroupRatio(cfg.Doge.Tokens, updatedToken.Group)
+			cfg.Doge.Tokens[index] = updatedToken
+			return nil
+		}
+		return errors.New("二狗子令牌不存在，请先刷新目录")
+	}); err != nil {
+		return fmt.Errorf("远端分组已修改，但保存本地目录失败，请手动同步确认: %w", err)
+	}
+	return nil
+}
+
+func dogeGroupRatio(tokens []config.DogeToken, group string) float64 {
+	for _, token := range tokens {
+		if token.Group == group && token.GroupRatio > 0 {
+			return token.GroupRatio
+		}
+	}
+	return 0
 }
 
 // 只有结构化应用拒绝和非超时 4xx 能证明远端没有完成创建；其余错误按结果未知处理。

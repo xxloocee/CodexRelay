@@ -15,6 +15,23 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
     $("profileName").value = profile?.name || "";
     $("profileNote").value = profile?.note || "";
     $("baseUrl").value = profile?.baseUrl || "";
+    const dogeToken = profile?.source === "doge"
+      ? serverState.snapshot?.doge?.tokens?.find((token) => Number(token.id) === Number(profile.remoteTokenId))
+      : null;
+    const dogeGroupField = $("dogeProfileGroupField");
+    dogeGroupField.classList.toggle("hidden", !dogeToken);
+    if (dogeToken) {
+      const groupSelect = $("dogeProfileGroup");
+      groupSelect.replaceChildren();
+      for (const group of serverState.snapshot?.doge?.groups || []) {
+        const displayName = String(serverState.snapshot?.doge?.groupDisplayNames?.[group] || group).trim();
+        groupSelect.appendChild(new Option(displayName || group, group));
+      }
+      if (!Array.from(groupSelect.options).some((option) => option.value === dogeToken.group)) {
+        groupSelect.appendChild(new Option(dogeToken.groupDisplayName || dogeToken.group, dogeToken.group));
+      }
+      groupSelect.value = dogeToken.group;
+    }
     // 完整密钥不再从状态快照返回。已有 Profile 留空提交表示保留后端密钥，
     // 新建 Profile 仍要求填写；避免把脱敏提示误当成真实密钥保存。
     const keyConfigured = Boolean(profile?.apiKeyConfigured);
@@ -217,10 +234,15 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
     }
     const oldIDs = new Set(serverState.snapshot.profiles.map((profile) => profile.id));
     const existingProfile = serverState.snapshot.profiles.find((profile) => profile.id === navigation.selectedId);
+    const existingDogeToken = existingProfile?.source === "doge"
+      ? serverState.snapshot?.doge?.tokens?.find((token) => Number(token.id) === Number(existingProfile.remoteTokenId))
+      : null;
+    const selectedDogeGroup = $("dogeProfileGroup").value;
     const payload = {
       id: drafts.isNew ? "" : navigation.selectedId,
       source: existingProfile?.source || "custom",
       category: $("profileCategory").value,
+      dogeGroup: existingDogeToken && selectedDogeGroup !== existingDogeToken.group ? selectedDogeGroup : "",
       name: $("profileName").value.trim(),
       note: $("profileNote").value.trim(),
       baseUrl: $("baseUrl").value.trim(),

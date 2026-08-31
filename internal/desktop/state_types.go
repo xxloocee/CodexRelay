@@ -253,8 +253,11 @@ type ProfileInput struct {
 	ID       string `json:"id"`
 	Source   string `json:"source"`
 	Category string `json:"category"`
-	Name     string `json:"name"`
-	BaseURL  string `json:"baseUrl"`
+	// DogeGroup 仅用于编辑已导入的二狗子令牌。空值表示不修改远端分组；
+	// 真实更新必须经由当前绑定的 User 权限访问令牌完成。
+	DogeGroup string `json:"dogeGroup,omitempty"`
+	Name      string `json:"name"`
+	BaseURL   string `json:"baseUrl"`
 	// APIKey 为空时表示编辑场景下保留已有密钥；新增 Profile 必须填写完整密钥。
 	APIKey       string            `json:"apiKey,omitempty"`
 	Note         string            `json:"note"`

@@ -148,10 +148,41 @@ func (s *DesktopService) SaveProfile(input ProfileInput) error {
 	input.APIKey = strings.TrimSpace(input.APIKey)
 	input.Note = strings.TrimSpace(input.Note)
 	input.DefaultModel = strings.TrimSpace(input.DefaultModel)
+	input.DogeGroup = strings.TrimSpace(input.DogeGroup)
 	if input.Headers == nil {
 		input.Headers = map[string]string{}
 	}
 	modelsOmitted := input.Models == nil
+	dogeGroupUpdated := input.DogeGroup != ""
+	if dogeGroupUpdated {
+		state := s.runtime.State()
+		if state == nil {
+			return errors.New("程序尚未初始化")
+		}
+		preflight := config.Clone(state.Config)
+		preflightInput := input
+		_, prospective, existing, err := applyProfileInput(&preflight, &preflightInput, modelsOmitted)
+		if err != nil {
+			return err
+		}
+		if !existing || prospective.Source != config.SourceDoge || prospective.RemoteTokenID <= 0 {
+			return errors.New("只有已导入的二狗子令牌可以修改远端分组")
+		}
+		if err := s.updateDogeTokenGroup(prospective.RemoteTokenID, input.DogeGroup); err != nil {
+			return err
+		}
+	}
+	if err := s.saveProfile(input, modelsOmitted); err != nil {
+		if dogeGroupUpdated {
+			s.handleHealthChanged()
+			return fmt.Errorf("远端分组已修改，但本地 Profile 保存失败，请手动同步确认: %w", err)
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) error {
 	s.clientConfigMu.Lock()
 	err := func() error {
 		defer s.clientConfigMu.Unlock()
@@ -249,6 +280,24 @@ func applyProfileInput(cfg *config.AppConfig, input *ProfileInput, modelsOmitted
 			return config.Profile{}, config.Profile{}, false, errors.New("二狗子 API 密钥由远端管理，不能修改")
 		}
 		input.APIKey = normalizeDogeAPIKey(previous.APIKey)
+		if input.DogeGroup != "" {
+			if !dogeContainsString(cfg.Doge.Groups, input.DogeGroup) {
+				return config.Profile{}, config.Profile{}, false, errors.New("所选远端分组当前不可用，请先刷新目录")
+			}
+			foundToken := false
+			for tokenIndex := range cfg.Doge.Tokens {
+				if cfg.Doge.Tokens[tokenIndex].ID != previous.RemoteTokenID {
+					continue
+				}
+				foundToken = true
+				break
+			}
+			if !foundToken {
+				return config.Profile{}, config.Profile{}, false, errors.New("二狗子令牌不存在，请先刷新目录")
+			}
+		}
+	} else if input.DogeGroup != "" {
+		return config.Profile{}, config.Profile{}, false, errors.New("只有已导入的二狗子令牌可以修改远端分组")
 	}
 	profile := config.Profile{
 		ID: input.ID, Source: input.Source, Category: input.Category, Name: input.Name, BaseURL: input.BaseURL,

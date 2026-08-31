@@ -1350,6 +1350,15 @@ export class ProfileInput {
              */
             this["category"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * DogeGroup 仅用于编辑已导入的二狗子令牌。空值表示不修改远端分组；
+             * 真实更新必须经由当前绑定的 User 权限访问令牌完成。
+             * @member
+             * @type {string | undefined}
+             */
+            this["dogeGroup"] = undefined;
+        }
         if (!("name" in $$source)) {
             /**
              * @member
@@ -1410,14 +1419,14 @@ export class ProfileInput {
      * @returns {ProfileInput}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType35;
+        const $$createField8_0 = $$createType0;
+        const $$createField9_0 = $$createType35;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
-            $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
+            $$parsedSource["headers"] = $$createField8_0($$parsedSource["headers"]);
         }
         if ("models" in $$parsedSource) {
-            $$parsedSource["models"] = $$createField8_0($$parsedSource["models"]);
+            $$parsedSource["models"] = $$createField9_0($$parsedSource["models"]);
         }
         return new ProfileInput(/** @type {Partial<ProfileInput>} */($$parsedSource));
     }

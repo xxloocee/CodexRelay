@@ -91,7 +91,7 @@ func (s *DesktopService) dogeRequestEnvelopeBodyWithClient(ctx context.Context, 
 		request.Header.Set("Authorization", "Bearer "+accessToken)
 	}
 	request.Header.Set("Accept", "application/json")
-	if method == http.MethodPost {
+	if method == http.MethodPost || method == http.MethodPut {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	response, err := client.Do(request)

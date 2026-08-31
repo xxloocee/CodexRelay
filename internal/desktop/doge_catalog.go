@@ -229,21 +229,42 @@ func (s *DesktopService) fetchDogeTokens(ctx context.Context, client *http.Clien
 			payload.Items = direct
 		}
 		for _, item := range payload.Items {
-			all = append(all, config.DogeToken{
-				ID: item.ID, UserID: item.UserID, MaskedKey: item.Key,
-				Status: item.Status, Name: item.Name, CreatedTime: item.CreatedTime,
-				AccessedTime: item.AccessedTime, ExpiredTime: item.ExpiredTime,
-				RemainQuota: item.RemainQuota, UnlimitedQuota: item.UnlimitedQuota,
-				ModelLimitsEnabled: item.ModelLimitsEnabled, ModelLimits: item.ModelLimits,
-				AllowIPs: item.AllowIPs, UsedQuota: item.UsedQuota, Group: item.Group,
-				CrossGroupRetry: item.CrossGroupRetry,
-			})
+			all = append(all, dogeTokenFromResponse(item))
 		}
 		if len(payload.Items) == 0 || (payload.Total > 0 && len(all) >= payload.Total) || len(payload.Items) < pageSize {
 			break
 		}
 	}
 	return all, nil
+}
+
+// fetchDogeToken 读取单个令牌的实时可更新字段。分组编辑必须使用这份快照，
+// 避免把本地目录中可能过期的额度、有效期或限制设置回写到远端。
+func (s *DesktopService) fetchDogeToken(ctx context.Context, client *http.Client, baseURL, accessToken string, id int64) (config.DogeToken, error) {
+	data, err := s.dogeRequestWithClient(ctx, client, baseURL, accessToken, http.MethodGet, fmt.Sprintf("/api/token/%d", id))
+	if err != nil {
+		return config.DogeToken{}, err
+	}
+	var payload dogeTokenResponse
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return config.DogeToken{}, fmt.Errorf("二狗子令牌详情格式无效: %w", err)
+	}
+	if payload.ID != id {
+		return config.DogeToken{}, errors.New("二狗子令牌详情与请求不匹配")
+	}
+	return dogeTokenFromResponse(payload), nil
+}
+
+func dogeTokenFromResponse(item dogeTokenResponse) config.DogeToken {
+	return config.DogeToken{
+		ID: item.ID, UserID: item.UserID, MaskedKey: item.Key,
+		Status: item.Status, Name: item.Name, CreatedTime: item.CreatedTime,
+		AccessedTime: item.AccessedTime, ExpiredTime: item.ExpiredTime,
+		RemainQuota: item.RemainQuota, UnlimitedQuota: item.UnlimitedQuota,
+		ModelLimitsEnabled: item.ModelLimitsEnabled, ModelLimits: item.ModelLimits,
+		AllowIPs: item.AllowIPs, UsedQuota: item.UsedQuota, Group: item.Group,
+		CrossGroupRetry: item.CrossGroupRetry,
+	}
 }
 
 func (s *DesktopService) fetchDogeTokenKey(ctx context.Context, client *http.Client, baseURL, accessToken string, id int64) (string, error) {
