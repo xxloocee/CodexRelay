@@ -71,13 +71,13 @@ export class DesktopState {
              */
             this["listenOnAllInterfaces"] = false;
         }
-		if (!("clientAccessHost" in $$source)) {
-			/**
-			 * @member
-			 * @type {string}
-			 */
-			this["clientAccessHost"] = "";
-		}
+        if (!("clientAccessHost" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["clientAccessHost"] = "";
+        }
         if (!("proxyUrl" in $$source)) {
             /**
              * @member
@@ -200,60 +200,516 @@ export class DesktopState {
      * @returns {DesktopState}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType0;
-        const $$createField9_0 = $$createType0;
-        const $$createField10_0 = $$createType2;
-        const $$createField11_0 = $$createType4;
-        const $$createField12_0 = $$createType6;
-        const $$createField13_0 = $$createType7;
-        const $$createField14_0 = $$createType8;
-        const $$createField15_0 = $$createType10;
-        const $$createField16_0 = $$createType11;
-        const $$createField18_0 = $$createType12;
-        const $$createField19_0 = $$createType13;
-        const $$createField20_0 = $$createType14;
-        const $$createField21_0 = $$createType15;
+        const $$createField8_0 = $$createType0;
+        const $$createField10_0 = $$createType0;
+        const $$createField11_0 = $$createType2;
+        const $$createField12_0 = $$createType4;
+        const $$createField13_0 = $$createType6;
+        const $$createField14_0 = $$createType7;
+        const $$createField15_0 = $$createType8;
+        const $$createField16_0 = $$createType10;
+        const $$createField17_0 = $$createType11;
+        const $$createField19_0 = $$createType12;
+        const $$createField20_0 = $$createType13;
+        const $$createField21_0 = $$createType14;
+        const $$createField22_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("proxyUrls" in $$parsedSource) {
-            $$parsedSource["proxyUrls"] = $$createField7_0($$parsedSource["proxyUrls"]);
+            $$parsedSource["proxyUrls"] = $$createField8_0($$parsedSource["proxyUrls"]);
         }
         if ("activeProfiles" in $$parsedSource) {
-            $$parsedSource["activeProfiles"] = $$createField9_0($$parsedSource["activeProfiles"]);
+            $$parsedSource["activeProfiles"] = $$createField10_0($$parsedSource["activeProfiles"]);
         }
         if ("profiles" in $$parsedSource) {
-            $$parsedSource["profiles"] = $$createField10_0($$parsedSource["profiles"]);
+            $$parsedSource["profiles"] = $$createField11_0($$parsedSource["profiles"]);
         }
         if ("failoverOrder" in $$parsedSource) {
-            $$parsedSource["failoverOrder"] = $$createField11_0($$parsedSource["failoverOrder"]);
+            $$parsedSource["failoverOrder"] = $$createField12_0($$parsedSource["failoverOrder"]);
         }
         if ("clientConfigs" in $$parsedSource) {
-            $$parsedSource["clientConfigs"] = $$createField12_0($$parsedSource["clientConfigs"]);
+            $$parsedSource["clientConfigs"] = $$createField13_0($$parsedSource["clientConfigs"]);
         }
         if ("network" in $$parsedSource) {
-            $$parsedSource["network"] = $$createField13_0($$parsedSource["network"]);
+            $$parsedSource["network"] = $$createField14_0($$parsedSource["network"]);
         }
         if ("systemProxy" in $$parsedSource) {
-            $$parsedSource["systemProxy"] = $$createField14_0($$parsedSource["systemProxy"]);
+            $$parsedSource["systemProxy"] = $$createField15_0($$parsedSource["systemProxy"]);
         }
         if ("requests" in $$parsedSource) {
-            $$parsedSource["requests"] = $$createField15_0($$parsedSource["requests"]);
+            $$parsedSource["requests"] = $$createField16_0($$parsedSource["requests"]);
         }
         if ("usage" in $$parsedSource) {
-            $$parsedSource["usage"] = $$createField16_0($$parsedSource["usage"]);
+            $$parsedSource["usage"] = $$createField17_0($$parsedSource["usage"]);
         }
         if ("preferences" in $$parsedSource) {
-            $$parsedSource["preferences"] = $$createField18_0($$parsedSource["preferences"]);
+            $$parsedSource["preferences"] = $$createField19_0($$parsedSource["preferences"]);
         }
         if ("tokenSwitch" in $$parsedSource) {
-            $$parsedSource["tokenSwitch"] = $$createField19_0($$parsedSource["tokenSwitch"]);
+            $$parsedSource["tokenSwitch"] = $$createField20_0($$parsedSource["tokenSwitch"]);
         }
         if ("taskNotification" in $$parsedSource) {
-            $$parsedSource["taskNotification"] = $$createField20_0($$parsedSource["taskNotification"]);
+            $$parsedSource["taskNotification"] = $$createField21_0($$parsedSource["taskNotification"]);
         }
         if ("doge" in $$parsedSource) {
-            $$parsedSource["doge"] = $$createField21_0($$parsedSource["doge"]);
+            $$parsedSource["doge"] = $$createField22_0($$parsedSource["doge"]);
         }
         return new DesktopState(/** @type {Partial<DesktopState>} */($$parsedSource));
+    }
+}
+
+export class DogeBillingAnalysis {
+    /**
+     * Creates a new DogeBillingAnalysis instance.
+     * @param {Partial<DogeBillingAnalysis>} [$$source = {}] - The source object to create the DogeBillingAnalysis.
+     */
+    constructor($$source = {}) {
+        if (!("summary" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingSummary}
+             */
+            this["summary"] = (new DogeBillingSummary());
+        }
+        if (!("tokens" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingRow[]}
+             */
+            this["tokens"] = [];
+        }
+        if (!("models" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingRow[]}
+             */
+            this["models"] = [];
+        }
+        if (!("groups" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingRow[]}
+             */
+            this["groups"] = [];
+        }
+        if (!("quota_per_unit" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["quota_per_unit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeBillingAnalysis instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeBillingAnalysis}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType16;
+        const $$createField1_0 = $$createType18;
+        const $$createField2_0 = $$createType18;
+        const $$createField3_0 = $$createType18;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("summary" in $$parsedSource) {
+            $$parsedSource["summary"] = $$createField0_0($$parsedSource["summary"]);
+        }
+        if ("tokens" in $$parsedSource) {
+            $$parsedSource["tokens"] = $$createField1_0($$parsedSource["tokens"]);
+        }
+        if ("models" in $$parsedSource) {
+            $$parsedSource["models"] = $$createField2_0($$parsedSource["models"]);
+        }
+        if ("groups" in $$parsedSource) {
+            $$parsedSource["groups"] = $$createField3_0($$parsedSource["groups"]);
+        }
+        return new DogeBillingAnalysis(/** @type {Partial<DogeBillingAnalysis>} */($$parsedSource));
+    }
+}
+
+export class DogeBillingOverviewItem {
+    /**
+     * Creates a new DogeBillingOverviewItem instance.
+     * @param {Partial<DogeBillingOverviewItem>} [$$source = {}] - The source object to create the DogeBillingOverviewItem.
+     */
+    constructor($$source = {}) {
+        if (!("key" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["key"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+        if (!("quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["quota"] = 0;
+        }
+        if (!("original_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["original_quota"] = 0;
+        }
+        if (!("request_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["request_count"] = 0;
+        }
+        if (!("token_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["token_count"] = 0;
+        }
+        if (!("effective_quota_per_1k_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["effective_quota_per_1k_tokens"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeBillingOverviewItem instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeBillingOverviewItem}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeBillingOverviewItem(/** @type {Partial<DogeBillingOverviewItem>} */($$parsedSource));
+    }
+}
+
+export class DogeBillingRow {
+    /**
+     * Creates a new DogeBillingRow instance.
+     * @param {Partial<DogeBillingRow>} [$$source = {}] - The source object to create the DogeBillingRow.
+     */
+    constructor($$source = {}) {
+        if (!("key" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["key"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("total_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total_quota"] = 0;
+        }
+        if (!("wallet_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["wallet_quota"] = 0;
+        }
+        if (!("subscription_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["subscription_quota"] = 0;
+        }
+        if (!("token_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["token_count"] = 0;
+        }
+        if (!("request_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["request_count"] = 0;
+        }
+        if (!("effective_quota_per_1k_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["effective_quota_per_1k_tokens"] = 0;
+        }
+        if (!("last_used_at" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["last_used_at"] = 0;
+        }
+        if (!("token_metrics" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingTokenMetrics}
+             */
+            this["token_metrics"] = (new DogeBillingTokenMetrics());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeBillingRow instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeBillingRow}
+     */
+    static createFrom($$source = {}) {
+        const $$createField9_0 = $$createType19;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("token_metrics" in $$parsedSource) {
+            $$parsedSource["token_metrics"] = $$createField9_0($$parsedSource["token_metrics"]);
+        }
+        return new DogeBillingRow(/** @type {Partial<DogeBillingRow>} */($$parsedSource));
+    }
+}
+
+export class DogeBillingSummary {
+    /**
+     * Creates a new DogeBillingSummary instance.
+     * @param {Partial<DogeBillingSummary>} [$$source = {}] - The source object to create the DogeBillingSummary.
+     */
+    constructor($$source = {}) {
+        if (!("total_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total_quota"] = 0;
+        }
+        if (!("original_total_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["original_total_quota"] = 0;
+        }
+        if (!("wallet_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["wallet_quota"] = 0;
+        }
+        if (!("wallet_multiplier_overview" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingOverviewItem[]}
+             */
+            this["wallet_multiplier_overview"] = [];
+        }
+        if (!("subscription_quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["subscription_quota"] = 0;
+        }
+        if (!("subscription_multiplier_overview" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingOverviewItem[]}
+             */
+            this["subscription_multiplier_overview"] = [];
+        }
+        if (!("multiplier_overview" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingOverviewItem[]}
+             */
+            this["multiplier_overview"] = [];
+        }
+        if (!("token_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["token_count"] = 0;
+        }
+        if (!("request_count" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["request_count"] = 0;
+        }
+        if (!("effective_quota_per_1k_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["effective_quota_per_1k_tokens"] = 0;
+        }
+        if (!("token_metrics" in $$source)) {
+            /**
+             * @member
+             * @type {DogeBillingTokenMetrics}
+             */
+            this["token_metrics"] = (new DogeBillingTokenMetrics());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeBillingSummary instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeBillingSummary}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType21;
+        const $$createField5_0 = $$createType21;
+        const $$createField6_0 = $$createType21;
+        const $$createField10_0 = $$createType19;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("wallet_multiplier_overview" in $$parsedSource) {
+            $$parsedSource["wallet_multiplier_overview"] = $$createField3_0($$parsedSource["wallet_multiplier_overview"]);
+        }
+        if ("subscription_multiplier_overview" in $$parsedSource) {
+            $$parsedSource["subscription_multiplier_overview"] = $$createField5_0($$parsedSource["subscription_multiplier_overview"]);
+        }
+        if ("multiplier_overview" in $$parsedSource) {
+            $$parsedSource["multiplier_overview"] = $$createField6_0($$parsedSource["multiplier_overview"]);
+        }
+        if ("token_metrics" in $$parsedSource) {
+            $$parsedSource["token_metrics"] = $$createField10_0($$parsedSource["token_metrics"]);
+        }
+        return new DogeBillingSummary(/** @type {Partial<DogeBillingSummary>} */($$parsedSource));
+    }
+}
+
+export class DogeBillingTokenMetrics {
+    /**
+     * Creates a new DogeBillingTokenMetrics instance.
+     * @param {Partial<DogeBillingTokenMetrics>} [$$source = {}] - The source object to create the DogeBillingTokenMetrics.
+     */
+    constructor($$source = {}) {
+        if (!("input_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["input_tokens"] = 0;
+        }
+        if (!("prompt_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["prompt_tokens"] = 0;
+        }
+        if (!("completion_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["completion_tokens"] = 0;
+        }
+        if (!("cache_read_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["cache_read_tokens"] = 0;
+        }
+        if (!("cache_write_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["cache_write_tokens"] = 0;
+        }
+        if (!("cache_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["cache_tokens"] = 0;
+        }
+        if (!("total_tokens_with_cache" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total_tokens_with_cache"] = 0;
+        }
+        if (!("input_share" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["input_share"] = 0;
+        }
+        if (!("completion_share" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["completion_share"] = 0;
+        }
+        if (!("avg_input_tokens_per_request" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["avg_input_tokens_per_request"] = 0;
+        }
+        if (!("avg_completion_tokens_per_request" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["avg_completion_tokens_per_request"] = 0;
+        }
+        if (!("avg_cache_tokens_per_request" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["avg_cache_tokens_per_request"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeBillingTokenMetrics instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeBillingTokenMetrics}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeBillingTokenMetrics(/** @type {Partial<DogeBillingTokenMetrics>} */($$parsedSource));
     }
 }
 
@@ -339,6 +795,13 @@ export class DogeState {
              * @type {string[]}
              */
             this["groups"] = [];
+        }
+        if (!("groupDisplayNames" in $$source)) {
+            /**
+             * @member
+             * @type {{ [_ in string]?: string }}
+             */
+            this["groupDisplayNames"] = {};
         }
         if (!("tokens" in $$source)) {
             /**
@@ -448,14 +911,15 @@ export class DogeState {
      * @returns {DogeState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType16;
-        const $$createField3_0 = $$createType17;
-        const $$createField7_0 = $$createType19;
+        const $$createField2_0 = $$createType22;
+        const $$createField3_0 = $$createType23;
+        const $$createField7_0 = $$createType25;
         const $$createField10_0 = $$createType3;
-        const $$createField11_0 = $$createType21;
-        const $$createField12_0 = $$createType22;
-        const $$createField13_0 = $$createType24;
-        const $$createField14_0 = $$createType25;
+        const $$createField11_0 = $$createType0;
+        const $$createField12_0 = $$createType27;
+        const $$createField13_0 = $$createType28;
+        const $$createField14_0 = $$createType30;
+        const $$createField15_0 = $$createType31;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("account" in $$parsedSource) {
             $$parsedSource["account"] = $$createField2_0($$parsedSource["account"]);
@@ -469,17 +933,20 @@ export class DogeState {
         if ("groups" in $$parsedSource) {
             $$parsedSource["groups"] = $$createField10_0($$parsedSource["groups"]);
         }
+        if ("groupDisplayNames" in $$parsedSource) {
+            $$parsedSource["groupDisplayNames"] = $$createField11_0($$parsedSource["groupDisplayNames"]);
+        }
         if ("tokens" in $$parsedSource) {
-            $$parsedSource["tokens"] = $$createField11_0($$parsedSource["tokens"]);
+            $$parsedSource["tokens"] = $$createField12_0($$parsedSource["tokens"]);
         }
         if ("notifications" in $$parsedSource) {
-            $$parsedSource["notifications"] = $$createField12_0($$parsedSource["notifications"]);
+            $$parsedSource["notifications"] = $$createField13_0($$parsedSource["notifications"]);
         }
         if ("tokenSwitch" in $$parsedSource) {
-            $$parsedSource["tokenSwitch"] = $$createField13_0($$parsedSource["tokenSwitch"]);
+            $$parsedSource["tokenSwitch"] = $$createField14_0($$parsedSource["tokenSwitch"]);
         }
         if ("tokenSwitches" in $$parsedSource) {
-            $$parsedSource["tokenSwitches"] = $$createField14_0($$parsedSource["tokenSwitches"]);
+            $$parsedSource["tokenSwitches"] = $$createField15_0($$parsedSource["tokenSwitches"]);
         }
         return new DogeState(/** @type {Partial<DogeState>} */($$parsedSource));
     }
@@ -520,6 +987,248 @@ export class DogeTokenCategoryInput {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new DogeTokenCategoryInput(/** @type {Partial<DogeTokenCategoryInput>} */($$parsedSource));
+    }
+}
+
+export class DogeUsageAnalyticsQuery {
+    /**
+     * Creates a new DogeUsageAnalyticsQuery instance.
+     * @param {Partial<DogeUsageAnalyticsQuery>} [$$source = {}] - The source object to create the DogeUsageAnalyticsQuery.
+     */
+    constructor($$source = {}) {
+        if (!("startTimestamp" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["startTimestamp"] = 0;
+        }
+        if (!("endTimestamp" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["endTimestamp"] = 0;
+        }
+        if (!("page" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["page"] = 0;
+        }
+        if (!("pageSize" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["pageSize"] = 0;
+        }
+        if (!("tokenName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["tokenName"] = "";
+        }
+        if (!("modelName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["modelName"] = "";
+        }
+        if (!("group" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["group"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeUsageAnalyticsQuery instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeUsageAnalyticsQuery}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeUsageAnalyticsQuery(/** @type {Partial<DogeUsageAnalyticsQuery>} */($$parsedSource));
+    }
+}
+
+export class DogeUsageLog {
+    /**
+     * Creates a new DogeUsageLog instance.
+     * @param {Partial<DogeUsageLog>} [$$source = {}] - The source object to create the DogeUsageLog.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["id"] = 0;
+        }
+        if (!("created_at" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["created_at"] = 0;
+        }
+        if (!("type" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["type"] = 0;
+        }
+        if (!("content" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["content"] = "";
+        }
+        if (!("token_name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["token_name"] = "";
+        }
+        if (!("model_name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["model_name"] = "";
+        }
+        if (!("quota" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["quota"] = 0;
+        }
+        if (!("prompt_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["prompt_tokens"] = 0;
+        }
+        if (!("completion_tokens" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["completion_tokens"] = 0;
+        }
+        if (!("use_time" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["use_time"] = 0;
+        }
+        if (!("is_stream" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["is_stream"] = false;
+        }
+        if (!("group" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["group"] = "";
+        }
+        if (!("other" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["other"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeUsageLog instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeUsageLog}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeUsageLog(/** @type {Partial<DogeUsageLog>} */($$parsedSource));
+    }
+}
+
+export class DogeUsageLogPage {
+    /**
+     * Creates a new DogeUsageLogPage instance.
+     * @param {Partial<DogeUsageLogPage>} [$$source = {}] - The source object to create the DogeUsageLogPage.
+     */
+    constructor($$source = {}) {
+        if (!("page" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["page"] = 0;
+        }
+        if (!("page_size" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["page_size"] = 0;
+        }
+        if (!("total" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["total"] = 0;
+        }
+        if (!("items" in $$source)) {
+            /**
+             * @member
+             * @type {DogeUsageLog[]}
+             */
+            this["items"] = [];
+        }
+        if (!("quota_per_unit" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["quota_per_unit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeUsageLogPage instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeUsageLogPage}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType33;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("items" in $$parsedSource) {
+            $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
+        }
+        return new DogeUsageLogPage(/** @type {Partial<DogeUsageLogPage>} */($$parsedSource));
     }
 }
 
@@ -616,12 +1325,13 @@ export class ProfileInput {
              */
             this["baseUrl"] = "";
         }
-        if (!("apiKey" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
+             * APIKey 为空时表示编辑场景下保留已有密钥；新增 Profile 必须填写完整密钥。
              * @member
-             * @type {string}
+             * @type {string | undefined}
              */
-            this["apiKey"] = "";
+            this["apiKey"] = undefined;
         }
         if (!("note" in $$source)) {
             /**
@@ -662,7 +1372,7 @@ export class ProfileInput {
      */
     static createFrom($$source = {}) {
         const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType27;
+        const $$createField8_0 = $$createType35;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
@@ -966,8 +1676,8 @@ export class PublicDogeNotifications {
      * @returns {PublicDogeNotifications}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType29;
-        const $$createField5_0 = $$createType31;
+        const $$createField3_0 = $$createType37;
+        const $$createField5_0 = $$createType39;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("announcements" in $$parsedSource) {
             $$parsedSource["announcements"] = $$createField3_0($$parsedSource["announcements"]);
@@ -1502,8 +2212,8 @@ export class PublicDogeTokenSwitchPrompt {
      * @returns {PublicDogeTokenSwitchPrompt}
      */
     static createFrom($$source = {}) {
-        const $$createField14_0 = $$createType33;
-        const $$createField15_0 = $$createType35;
+        const $$createField14_0 = $$createType41;
+        const $$createField15_0 = $$createType43;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("candidates" in $$parsedSource) {
             $$parsedSource["candidates"] = $$createField14_0($$parsedSource["candidates"]);
@@ -1610,6 +2320,9 @@ export class PublicProfile {
         }
         if (!("apiKey" in $$source)) {
             /**
+             * APIKey 始终为空，保留字段是为了兼容已有 Wails/前端模型；完整密钥只在
+             * 后端配置中保存，不再通过状态快照下发。编辑已有 Profile 时提交空值表示
+             * 保留原密钥，新增 Profile 仍必须提交完整密钥。
              * @member
              * @type {string}
              */
@@ -1622,7 +2335,7 @@ export class PublicProfile {
              */
             this["apiKeyConfigured"] = false;
         }
-        if (!("apiKeyHint" in $$source)) {
+        if (/** @type {any} */(false)) {
             /**
              * @member
              * @type {string | undefined}
@@ -1695,14 +2408,14 @@ export class PublicProfile {
      * @returns {PublicProfile}
      */
     static createFrom($$source = {}) {
-        const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType37;
+        const $$createField9_0 = $$createType0;
+        const $$createField10_0 = $$createType45;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
-            $$parsedSource["headers"] = $$createField7_0($$parsedSource["headers"]);
+            $$parsedSource["headers"] = $$createField9_0($$parsedSource["headers"]);
         }
         if ("models" in $$parsedSource) {
-            $$parsedSource["models"] = $$createField8_0($$parsedSource["models"]);
+            $$parsedSource["models"] = $$createField10_0($$parsedSource["models"]);
         }
         return new PublicProfile(/** @type {Partial<PublicProfile>} */($$parsedSource));
     }
@@ -1777,8 +2490,8 @@ export class TaskNotificationState {
      * @returns {TaskNotificationState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType38;
-        const $$createField6_0 = $$createType39;
+        const $$createField2_0 = $$createType46;
+        const $$createField6_0 = $$createType47;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("events" in $$parsedSource) {
             $$parsedSource["events"] = $$createField2_0($$parsedSource["events"]);
@@ -1933,27 +2646,35 @@ const $$createType12 = config$0.Preferences.createFrom;
 const $$createType13 = config$0.TokenSwitchSettings.createFrom;
 const $$createType14 = TaskNotificationState.createFrom;
 const $$createType15 = DogeState.createFrom;
-const $$createType16 = PublicDogeAccount.createFrom;
-const $$createType17 = $Create.Map($Create.Any, $Create.Any);
-const $$createType18 = PublicDogeSubscription.createFrom;
-const $$createType19 = $Create.Array($$createType18);
-const $$createType20 = PublicDogeToken.createFrom;
+const $$createType16 = DogeBillingSummary.createFrom;
+const $$createType17 = DogeBillingRow.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = DogeBillingTokenMetrics.createFrom;
+const $$createType20 = DogeBillingOverviewItem.createFrom;
 const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = PublicDogeNotifications.createFrom;
-const $$createType23 = PublicDogeTokenSwitchPrompt.createFrom;
-const $$createType24 = $Create.Nullable($$createType23);
-const $$createType25 = $Create.Map($Create.Any, $$createType24);
-const $$createType26 = ModelInput.createFrom;
+const $$createType22 = PublicDogeAccount.createFrom;
+const $$createType23 = $Create.Map($Create.Any, $Create.Any);
+const $$createType24 = PublicDogeSubscription.createFrom;
+const $$createType25 = $Create.Array($$createType24);
+const $$createType26 = PublicDogeToken.createFrom;
 const $$createType27 = $Create.Array($$createType26);
-const $$createType28 = PublicDogeAnnouncement.createFrom;
-const $$createType29 = $Create.Array($$createType28);
-const $$createType30 = PublicDogeAlert.createFrom;
-const $$createType31 = $Create.Array($$createType30);
-const $$createType32 = PublicDogeTokenSwitchCandidate.createFrom;
+const $$createType28 = PublicDogeNotifications.createFrom;
+const $$createType29 = PublicDogeTokenSwitchPrompt.createFrom;
+const $$createType30 = $Create.Nullable($$createType29);
+const $$createType31 = $Create.Map($Create.Any, $$createType30);
+const $$createType32 = DogeUsageLog.createFrom;
 const $$createType33 = $Create.Array($$createType32);
-const $$createType34 = PublicDogeTokenSwitchHistory.createFrom;
+const $$createType34 = ModelInput.createFrom;
 const $$createType35 = $Create.Array($$createType34);
-const $$createType36 = PublicModel.createFrom;
+const $$createType36 = PublicDogeAnnouncement.createFrom;
 const $$createType37 = $Create.Array($$createType36);
-const $$createType38 = config$0.TaskNotificationEvents.createFrom;
-const $$createType39 = tasknotify$0.Status.createFrom;
+const $$createType38 = PublicDogeAlert.createFrom;
+const $$createType39 = $Create.Array($$createType38);
+const $$createType40 = PublicDogeTokenSwitchCandidate.createFrom;
+const $$createType41 = $Create.Array($$createType40);
+const $$createType42 = PublicDogeTokenSwitchHistory.createFrom;
+const $$createType43 = $Create.Array($$createType42);
+const $$createType44 = PublicModel.createFrom;
+const $$createType45 = $Create.Array($$createType44);
+const $$createType46 = config$0.TaskNotificationEvents.createFrom;
+const $$createType47 = tasknotify$0.Status.createFrom;

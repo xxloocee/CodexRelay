@@ -210,7 +210,12 @@ body {
 *::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 *::-webkit-scrollbar-corner { background: transparent; }
 
-.primary-button { background: var(--accent-fill-compact); }
+.primary-button {
+  background: var(--accent-fill-compact);
+  background-position: center;
+  background-size: 160% 100%;
+  background-repeat: no-repeat;
+}
 
 .add-button,
 .segmented button.active {
@@ -224,7 +229,12 @@ body {
   color: var(--on-accent);
 }
 
-.primary-button:hover { background: var(--accent-fill-compact-hover); }
+.primary-button:hover {
+  background: var(--accent-fill-compact-hover);
+  background-position: center;
+  background-size: 160% 100%;
+  background-repeat: no-repeat;
+}
 .add-button:hover { background: var(--accent-fill-hover); }
 
 .switch-input:checked,

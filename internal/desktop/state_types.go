@@ -58,6 +58,7 @@ type DogeState struct {
 	RedemptionEnabled             bool                                    `json:"redemptionEnabled"`
 	TopupLink                     string                                  `json:"topupLink"`
 	Groups                        []string                                `json:"groups"`
+	GroupDisplayNames             map[string]string                       `json:"groupDisplayNames"`
 	Tokens                        []PublicDogeToken                       `json:"tokens"`
 	Notifications                 PublicDogeNotifications                 `json:"notifications"`
 	TokenSwitch                   *PublicDogeTokenSwitchPrompt            `json:"tokenSwitch,omitempty"`

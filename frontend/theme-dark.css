@@ -36,7 +36,11 @@
   .task-notification-setting-card,
   .relay-data-directory-row,
   .client-config-row,
-  .usage-summary,
+  .usage-filters,
+  .usage-table-wrap,
+  .billing-stat-card,
+  .billing-overview-card,
+  .billing-dimension-table-wrap,
   .homepage-setting-card,
   .failover-setting-card,
   .doge-logo-frame,
@@ -54,8 +58,7 @@
 :root[data-color-mode="dark"] input:not([type="checkbox"]):not([type="radio"]),
 :root[data-color-mode="dark"] textarea,
 :root[data-color-mode="dark"] select,
-:root[data-color-mode="dark"] .readonly-value,
-:root[data-color-mode="dark"] #usageProfile {
+:root[data-color-mode="dark"] .readonly-value {
   border-color: var(--line);
   background: var(--field);
   color: var(--text);
@@ -205,6 +208,9 @@
   .client-setup-values span
 ) { color: var(--muted); }
 
+:root[data-color-mode="dark"] .segmented button.active { color: var(--on-accent); }
+:root[data-color-mode="dark"] .usage-page-number.active { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); }
+
 :root[data-color-mode="dark"] :is(
   .task-notification-card-header,
   .task-notification-number-fields,
@@ -243,3 +249,14 @@
 :root[data-color-mode="dark"] .doge-topup-button { border-color: #4d3e68; background: #241c33; color: #c5a9ff; }
 :root[data-color-mode="dark"] .doge-topup-button:hover { border-color: #6f5796; background: #2d2240; }
 :root[data-color-mode="dark"] .doge-topup-mark { background: #281f3b; color: #c5a9ff; }
+:root[data-color-mode="dark"] :is(.usage-key-badge, .usage-model-badge, .usage-cost-badge) { border-color: var(--line); background: var(--surface); color: var(--text); }
+:root[data-color-mode="dark"] :is(.billing-stat-value, .billing-stat-details strong, .billing-overview-total strong, .usage-token-pair, .usage-details, .billing-total-value) { color: var(--text); }
+:root[data-color-mode="dark"] :is(.billing-stat-details, .billing-overview-table-wrap, .billing-overview-total, .billing-overview-total > div + div) { border-color: var(--line); }
+:root[data-color-mode="dark"] .billing-overview-total { background: var(--surface); }
+:root[data-color-mode="dark"] :is(.usage-log-table, .billing-overview-table, .billing-dimension-table) th { background: var(--surface); color: var(--muted); }
+:root[data-color-mode="dark"] .table-state { background: rgba(18, 24, 32, .9); color: var(--muted); }
+:root[data-color-mode="dark"] .usage-page-loading { background: rgba(12, 16, 21, .82); }
+:root[data-color-mode="dark"] .usage-timing-badge.success { background: #17382b; color: #70d3a8; }
+:root[data-color-mode="dark"] .usage-timing-badge.warning { background: #3a3018; color: #edbd67; }
+:root[data-color-mode="dark"] .usage-timing-badge.danger { background: #41232c; color: #ff91a6; }
+:root[data-color-mode="dark"] .usage-timing-badge.neutral { background: var(--surface); color: var(--muted); }

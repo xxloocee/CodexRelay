@@ -41,6 +41,10 @@ func (s *DesktopService) dogeRequestWithClient(ctx context.Context, client *http
 	return s.dogeRequestBodyWithClient(ctx, client, baseURL, accessToken, method, path, nil, "")
 }
 
+func (s *DesktopService) dogeRequestEnvelopeWithClient(ctx context.Context, client *http.Client, baseURL, accessToken, method, path string) (dogeEnvelope, error) {
+	return s.dogeRequestEnvelopeBodyWithClient(ctx, client, baseURL, accessToken, method, path, nil, "")
+}
+
 func (s *DesktopService) dogeRequestJSONWithClient(ctx context.Context, client *http.Client, baseURL, accessToken, method, path string, payload any, sensitive string) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -62,9 +66,17 @@ func (s *DesktopService) newDogeHTTPClient() (*http.Client, error) {
 }
 
 func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *http.Client, baseURL, accessToken, method, path string, body io.Reader, sensitive string) ([]byte, error) {
+	envelope, err := s.dogeRequestEnvelopeBodyWithClient(ctx, client, baseURL, accessToken, method, path, body, sensitive)
+	if err != nil {
+		return nil, err
+	}
+	return envelope.Data, nil
+}
+
+func (s *DesktopService) dogeRequestEnvelopeBodyWithClient(ctx context.Context, client *http.Client, baseURL, accessToken, method, path string, body io.Reader, sensitive string) (dogeEnvelope, error) {
 	target, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || target.Host == "" {
-		return nil, errors.New("二狗子 API 地址无效")
+		return dogeEnvelope{}, errors.New("二狗子 API 地址无效")
 	}
 	requestPath, query, hasQuery := strings.Cut(path, "?")
 	target.Path = strings.TrimRight(target.Path, "/") + requestPath
@@ -73,7 +85,7 @@ func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *
 	}
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), body)
 	if err != nil {
-		return nil, fmt.Errorf("创建二狗子请求失败: %w", err)
+		return dogeEnvelope{}, fmt.Errorf("创建二狗子请求失败: %w", err)
 	}
 	if strings.TrimSpace(accessToken) != "" {
 		request.Header.Set("Authorization", "Bearer "+accessToken)
@@ -84,19 +96,19 @@ func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("二狗子请求失败: %s", relay.SanitizeError(err))
+		return dogeEnvelope{}, fmt.Errorf("二狗子请求失败: %s", relay.SanitizeError(err))
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
-		return nil, fmt.Errorf("读取二狗子响应失败: %w", err)
+		return dogeEnvelope{}, fmt.Errorf("读取二狗子响应失败: %w", err)
 	}
 	var envelope dogeEnvelope
 	if decodeErr := json.Unmarshal(responseBody, &envelope); decodeErr != nil {
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, &dogeHTTPError{StatusCode: response.StatusCode}
+			return dogeEnvelope{}, &dogeHTTPError{StatusCode: response.StatusCode}
 		}
-		return nil, fmt.Errorf("二狗子响应格式无效: %w", decodeErr)
+		return dogeEnvelope{}, fmt.Errorf("二狗子响应格式无效: %w", decodeErr)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 || (!envelope.Success && envelope.Message != "") {
 		message := strings.TrimSpace(envelope.Message)
@@ -109,10 +121,10 @@ func (s *DesktopService) dogeRequestBodyWithClient(ctx context.Context, client *
 		if sensitive != "" {
 			message = strings.ReplaceAll(message, sensitive, "[已隐藏]")
 		}
-		return nil, &dogeHTTPError{StatusCode: response.StatusCode, Message: message}
+		return dogeEnvelope{}, &dogeHTTPError{StatusCode: response.StatusCode, Message: message}
 	}
 	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
-		return []byte("null"), nil
+		envelope.Data = json.RawMessage("null")
 	}
-	return envelope.Data, nil
+	return envelope, nil
 }

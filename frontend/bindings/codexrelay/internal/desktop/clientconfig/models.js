@@ -71,13 +71,13 @@ export class PublicClientConfig {
              */
             this["configured"] = false;
         }
-		if (!("requiresProfile" in $$source)) {
-			/**
-			 * @member
-			 * @type {boolean}
-			 */
-			this["requiresProfile"] = false;
-		}
+        if (!("requiresProfile" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["requiresProfile"] = false;
+        }
         if (!("statusText" in $$source)) {
             /**
              * @member

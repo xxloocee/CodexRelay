@@ -189,6 +189,7 @@ func (s *DesktopService) UnbindDoge() error {
 		cfg.Doge.Subscriptions = []config.DogeSubscription{}
 		cfg.Doge.Topup = config.DogeTopupInfo{}
 		cfg.Doge.Groups = []string{}
+		cfg.Doge.GroupDisplayNames = map[string]string{}
 		cfg.Doge.Tokens = []config.DogeToken{}
 		cfg.Doge.TokenOrder = []string{}
 		cfg.Doge.LastSyncAt = time.Time{}

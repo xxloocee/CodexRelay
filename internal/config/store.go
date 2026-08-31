@@ -86,6 +86,9 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 	if cfg.Doge.Groups == nil {
 		cfg.Doge.Groups = []string{}
 	}
+	if cfg.Doge.GroupDisplayNames == nil {
+		cfg.Doge.GroupDisplayNames = map[string]string{}
+	}
 	if cfg.Doge.Tokens == nil {
 		cfg.Doge.Tokens = []DogeToken{}
 	}
