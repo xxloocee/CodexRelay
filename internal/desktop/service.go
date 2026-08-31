@@ -22,7 +22,7 @@ import (
 	"codexrelay/internal/tasknotify"
 )
 
-var applicationVersion = "2.3.1"
+var applicationVersion = "2.3.2"
 
 const (
 	NotificationKindBalance      = "balance"
@@ -37,6 +37,7 @@ type DesktopService struct {
 	server                   *http.Server
 	listener                 net.Listener
 	mu                       sync.Mutex
+	proxyMu                  sync.Mutex
 	onStateChanged           func()
 	stateChanged             []func()
 	needsOnboarding          bool

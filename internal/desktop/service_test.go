@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/desktop/clientconfig"
 	"codexrelay/internal/relay"
 	"codexrelay/internal/usage"
 )
@@ -109,7 +110,7 @@ func TestReorderFailoverProfilesPersistsOrderAcrossSources(t *testing.T) {
 	}
 }
 
-func TestSaveProfileReturnsPlaintextKeyAndNote(t *testing.T) {
+func TestSaveProfileReturnsMaskedKeyAndNote(t *testing.T) {
 	directory := t.TempDir()
 	store := config.NewStore(filepath.Join(directory, "config.json"))
 	cfg := config.Default(18765)
@@ -123,8 +124,11 @@ func TestSaveProfileReturnsPlaintextKeyAndNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := service.GetState()
-	if len(state.Profiles) != 1 || state.Profiles[0].APIKey != "sk-example" || state.Profiles[0].Note != "稳定线路" {
+	if len(state.Profiles) != 1 || state.Profiles[0].APIKey != "" || !state.Profiles[0].APIKeyConfigured || state.Profiles[0].APIKeyHint != "**********" || state.Profiles[0].Note != "稳定线路" {
 		t.Fatalf("profiles = %+v", state.Profiles)
+	}
+	if runtime.State().Config.Profiles[0].APIKey != "sk-example" {
+		t.Fatal("saved API key was not retained in the private runtime config")
 	}
 }
 
@@ -289,6 +293,7 @@ func TestSetProxyPortUpdatesRuntimeAndPersistsConfig(t *testing.T) {
 	}
 	runtime := newTestRuntime(t, directory, store, cfg)
 	service := NewDesktopService(runtime)
+	startTestProxyListener(t, service)
 	if err := service.SetProxyPort(18766); err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +336,7 @@ func TestSetProxyListenAllInterfacesUpdatesRuntimeAndPersistsConfig(t *testing.T
 	}
 	runtime := newTestRuntime(t, directory, store, cfg)
 	service := NewDesktopService(runtime)
+	startTestProxyListener(t, service)
 	stateChanges := 0
 	service.setStateChangedHandler(func() { stateChanges++ })
 
@@ -476,6 +482,9 @@ func TestSwitchDogeTokenUpdatesCodexClientConfiguration(t *testing.T) {
 	cfg.ActiveProfiles = map[string]string{config.CategoryCodex: "doge-profile"}
 	cfg.FailoverOrder = map[string][]string{config.CategoryCodex: {"doge-profile", "doge-candidate"}}
 	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientconfig.Configure(cfg, config.CategoryCodex, "doge-profile"); err != nil {
 		t.Fatal(err)
 	}
 	runtime := newTestRuntime(t, directory, store, cfg)
@@ -1224,4 +1233,23 @@ func newTestRuntime(t *testing.T, directory string, store *config.Store, cfg con
 		t.Fatal(err)
 	}
 	return runtime
+}
+
+func startTestProxyListener(t *testing.T, service *DesktopService) {
+	t.Helper()
+	state := service.runtime.State()
+	listener, server, err := service.prepareProxyListener(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.mu.Lock()
+	service.listener = listener
+	service.server = server
+	service.mu.Unlock()
+	service.serveProxy(server, listener)
+	t.Cleanup(func() {
+		if err := service.ServiceShutdown(); err != nil {
+			t.Errorf("shut down test proxy: %v", err)
+		}
+	})
 }

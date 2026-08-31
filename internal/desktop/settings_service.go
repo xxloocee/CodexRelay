@@ -31,6 +31,8 @@ func (s *DesktopService) SetNetwork(input network.Settings) error {
 func (s *DesktopService) SetProxyPort(port int) error {
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
 	if port < 1 || port > 65535 {
 		return errors.New("监听端口必须是 1 到 65535 之间的整数")
 	}
@@ -82,6 +84,8 @@ func (s *DesktopService) SetProxyPort(port int) error {
 func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("代理尚未初始化")
@@ -92,7 +96,7 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 	if !enabled && !config.IsLoopbackClientAccessHost(state.Config.ClientAccessHost) {
 		return errors.New("当前客户端访问主机不是回环地址，请先改回回环地址后再关闭允许 WSL2 访问")
 	}
-	listener, server, err := s.prepareProxyListener(state.Config.ProxyPort, enabled)
+	oldServer, server, listener, err := s.rebindProxyListenScope(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces, enabled)
 	if err != nil {
 		return err
 	}
@@ -101,19 +105,14 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 		return nil
 	}); err != nil {
 		_ = listener.Close()
+		if restoreErr := s.restoreProxyListener(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces); restoreErr != nil {
+			return fmt.Errorf("%v；恢复原监听失败: %w", err, restoreErr)
+		}
+		shutdownProxyServerAsync(oldServer)
 		return err
 	}
-	if !s.installProxyListener(server, listener) {
-		restoreConfigErr := s.updateConfig(func(cfg *config.AppConfig) error {
-			cfg.ListenOnAllInterfaces = state.Config.ListenOnAllInterfaces
-			return nil
-		})
-		_ = listener.Close()
-		if restoreConfigErr != nil {
-			return fmt.Errorf("代理监听切换失败；本地配置恢复错误: %v", restoreConfigErr)
-		}
-		return errors.New("代理监听切换失败，已恢复原配置")
-	}
+	s.attachProxyListener(server, listener)
+	shutdownProxyServerAsync(oldServer)
 	return nil
 }
 
