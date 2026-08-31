@@ -990,6 +990,45 @@ export class DogeTokenCategoryInput {
     }
 }
 
+/**
+ * DogeTokenCreateInput 描述使用二狗子 User 权限令牌创建新 API 密钥所需的最小参数。
+ * 分组值必须使用 /api/user/self/groups 返回的原始 key，名称由用户自行填写。
+ */
+export class DogeTokenCreateInput {
+    /**
+     * Creates a new DogeTokenCreateInput instance.
+     * @param {Partial<DogeTokenCreateInput>} [$$source = {}] - The source object to create the DogeTokenCreateInput.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("group" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["group"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DogeTokenCreateInput instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {DogeTokenCreateInput}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DogeTokenCreateInput(/** @type {Partial<DogeTokenCreateInput>} */($$parsedSource));
+    }
+}
+
 export class DogeUsageAnalyticsQuery {
     /**
      * Creates a new DogeUsageAnalyticsQuery instance.

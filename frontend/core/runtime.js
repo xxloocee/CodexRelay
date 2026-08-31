@@ -14,6 +14,7 @@ export function mountRuntime({
   setDogeQuotaPopover,
   setAnnouncementPanel,
   closeDogeTopupModal,
+  closeDogeTokenModal,
   closeDogeCategoryDialog,
   closeClientSetupModal,
 }) {
@@ -28,6 +29,7 @@ export function mountRuntime({
     setDogeQuotaPopover(false);
     setAnnouncementPanel(false);
     if (!$("dogeTopupModal").classList.contains("hidden")) closeDogeTopupModal();
+    if (!$("dogeTokenCreateModal").classList.contains("hidden")) closeDogeTokenModal();
     if (!$("dogeCategoryModal").classList.contains("hidden")) closeDogeCategoryDialog();
     if (!$("clientSetupModal").classList.contains("hidden")) closeClientSetupModal();
   };

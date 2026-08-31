@@ -98,6 +98,16 @@ export function ConfigureDetectedClients() {
 }
 
 /**
+ * CreateDogeToken 使用当前绑定的 User 权限令牌创建一个新的不限额、永不过期 API 密钥。
+ * New API 的创建接口不返回令牌 ID，创建后通过目录差异定位新令牌，再用现有密钥接口读取完整 key。
+ * @param {$models.DogeTokenCreateInput} input
+ * @returns {$CancellablePromise<void>}
+ */
+export function CreateDogeToken(input) {
+    return $Call.ByID(2932418749, input);
+}
+
+/**
  * @param {string} id
  * @returns {$CancellablePromise<void>}
  */

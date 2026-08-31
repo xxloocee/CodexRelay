@@ -176,6 +176,7 @@ dogeAccountFeature = createDogeAccount({
 });
 const {
   closeDogeTopupModal,
+  closeDogeTokenModal,
   formatDogeUSD,
   isDogeSyncing,
   mount: mountDogeAccount,
@@ -227,6 +228,7 @@ mountRuntime({
   setDogeQuotaPopover,
   setAnnouncementPanel,
   closeDogeTopupModal,
+  closeDogeTokenModal,
   closeDogeCategoryDialog,
   closeClientSetupModal,
 });

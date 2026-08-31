@@ -18,12 +18,16 @@ Authorization: Bearer <访问令牌>
 | GET | `/api/subscription/self` | 当前套餐；只保存 `subscriptions` 中 `status=active` 的项目 |
 | GET | `/api/user/topup/info` | 兑换开关和 `topup_link` 购买入口 |
 | POST | `/api/user/topup` | 使用 `{ "key": "兑换码" }` 兑换额度 |
+| POST | `/api/token/` | 使用 User 权限创建永不过期、不限额度的 API 密钥 |
+| POST | `/api/token/{id}/key` | 获取当前用户指定令牌的完整密钥 |
 | GET | `/api/status` | 公开站点状态、公告列表和 `announcements_enabled` |
 | GET | `/api/notice` | 公开当前公告正文 |
 
 `GET /api/user/billing/redemption/self` 是兑换历史记录接口，不作为当前余额来源，因此当前版本不调用它。
 
 令牌目录同步还会读取 `/api/token/` 返回的令牌 `id`、`status`、`group`、`name` 和掩码密钥。依据用户提供的脱敏接口样本，`status=1` 作为当前可用状态；后台同步发现当前已启用令牌从最新目录消失，或状态不再为 1、所属分组不再出现在当前权限目录时，会复用右下角令牌切换窗口提示用户。该提示、托盘和主窗口的切换入口共用当前类别下的可用集合：类别相同、状态为 1、分组仍在当前权限目录且本地已有完整密钥；候选不再按远端分组二次筛选。
+
+创建请求固定提交 `name`、`group`、`unlimited_quota=true`、`expired_time=-1` 和 `remain_quota=0`。官方创建响应没有令牌 ID，因此实现会在创建前后各读取一次远端目录；只有新增同名令牌恰好一个时才继续读取完整密钥并写入本地目录，多个候选不按时间或 ID 猜测归属。若创建请求发生传输、读体、成功响应解析、HTTP 408 或 5xx 错误，客户端无法证明远端没有完成写入，会明确提示“结果未知”并要求先手动同步；若远端已经明确创建成功但后续目录或密钥读取失败，则提示“已创建”并要求手动同步，避免重复创建。
 
 令牌因状态或分组失效后再次恢复可用时，若原 Profile 仍在本地且该类别仍有活动 Profile，右下角会提示恢复的令牌；自动切换已经离开原 Profile 时，提示以当前活动 Profile 作为切换前置，并将恢复令牌放入可用候选。
 
@@ -53,5 +57,6 @@ Authorization: Bearer <访问令牌>
 ## 安全边界
 
 - 绑定访问令牌只写入便携 `config.json`，不返回到 `DesktopState`。
+- 新创建的完整 API 密钥只写入后端配置，不作为 Wails 方法返回值或前端状态字段。
 - 兑换码只存在于兑换请求体和本次调用栈，不写入配置、日志、fixture 或错误正文。
 - 兑换成功后重新读取用户、套餐和充值配置，不通过余额差值推算兑换结果。

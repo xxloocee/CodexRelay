@@ -14,6 +14,7 @@ import { showConfirmDialog, syncModalBody } from "../../core/modal.js";
 import { runtimeState, serverState, setServerSnapshot } from "../../core/store.js";
 import { createDogeAnnouncements } from "./announcements.js";
 import { createDogeOnboarding } from "./onboarding.js";
+import { createDogeTokenCreator } from "./token-create.js";
 
 export function createDogeAccount({
   loadState,
@@ -33,6 +34,10 @@ export function createDogeAccount({
     renderOnboarding,
     mount: mountOnboarding,
   } = createDogeOnboarding({ loadState, openDogeCategoryDialog });
+  const {
+    closeDogeTokenModal,
+    mount: mountDogeTokenCreator,
+  } = createDogeTokenCreator({ loadState, openDogeCategoryDialog });
 
   function formatDogeUSD(value) {
     const amount = Number(value);
@@ -152,6 +157,7 @@ export function createDogeAccount({
     }
     const topupButton = $("openDogeTopup");
     topupButton.disabled = !bound || syncing;
+    $("openDogeTokenCreate").disabled = !bound || syncing;
     renderDogeTopupState();
   }
 
@@ -347,6 +353,7 @@ export function createDogeAccount({
       if (!$("dogeQuotaWrap").contains(event.relatedTarget)) setDogeQuotaPopover(false);
     });
     mountAnnouncements();
+    mountDogeTokenCreator();
     $("openDogeTopup").addEventListener("click", openDogeTopupModal);
     $("closeDogeTopupModal").addEventListener("click", closeDogeTopupModal);
     $("openDogeProfile").addEventListener("click", openDogeProfile);
@@ -371,6 +378,7 @@ export function createDogeAccount({
     setAnnouncementPanel,
     renderOnboarding,
     closeDogeTopupModal,
+    closeDogeTokenModal,
     setDogeQuotaPopover,
     mount,
   };
