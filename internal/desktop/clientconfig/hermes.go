@@ -12,8 +12,6 @@ package clientconfig
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -21,23 +19,29 @@ import (
 )
 
 func configureHermes(path, endpoint, key string, models []config.ModelEntry, defaultModel string) error {
-	if err := backupClientFile(path); err != nil {
-		return err
+	_, err := configureSingleResult(path, func(existing []byte) ([]byte, error) {
+		return renderHermes(existing, endpoint, key, models, defaultModel)
+	})
+	return err
+}
+
+func renderHermes(existing []byte, endpoint, key string, models []config.ModelEntry, defaultModel string) ([]byte, error) {
+	if err := validateExternalValue("代理地址", endpoint); err != nil {
+		return nil, err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("读取 Hermes config.yaml 失败: %w", err)
+	if err := validateExternalValue("访问令牌", key); err != nil {
+		return nil, err
 	}
-	raw := strings.ReplaceAll(string(data), "\r\n", "\n")
+	raw := strings.ReplaceAll(string(existing), "\r\n", "\n")
 	blockLines := hermesProviderLines(endpoint, key, models, defaultModel)
 	if strings.TrimSpace(raw) == "" {
 		raw = strings.Join(append([]string{"custom_providers:"}, blockLines...), "\n") + "\n"
-		return writeClientFile(path, []byte(raw))
+		return []byte(raw), nil
 	}
 	sectionStart := strings.Index(raw, "custom_providers:")
 	if sectionStart < 0 {
 		raw = strings.TrimRight(raw, "\n") + "\n\n" + strings.Join(append([]string{"custom_providers:"}, blockLines...), "\n") + "\n"
-		return writeClientFile(path, []byte(raw))
+		return []byte(raw), nil
 	}
 	// 通过行边界定位下一个顶层键，避免覆盖 custom_providers 以外的 YAML 区域。
 	lines := strings.Split(raw, "\n")
@@ -49,7 +53,7 @@ func configureHermes(path, endpoint, key string, models []config.ModelEntry, def
 		}
 	}
 	if startLine < 0 {
-		return errors.New("无法定位 Hermes custom_providers 配置区域")
+		return nil, errors.New("无法定位 Hermes custom_providers 配置区域")
 	}
 	endLine := len(lines)
 	for i := startLine + 1; i < len(lines); i++ {
@@ -80,11 +84,11 @@ func configureHermes(path, endpoint, key string, models []config.ModelEntry, def
 		merged := mergeHermesProviderLines(existing, endpoint, key, models, defaultModel)
 		lines = append(append(append([]string{}, lines[:providerStart]...), merged...), lines[providerEnd:]...)
 	}
-	return writeClientFile(path, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")+"\n"))
+	return []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"), nil
 }
 
 func hermesProviderLines(endpoint, key string, models []config.ModelEntry, defaultModel string) []string {
-	lines := []string{"  - name: codexrelay", "    base_url: " + endpoint, "    api_key: " + key, "    api_mode: responses"}
+	lines := []string{"  - name: codexrelay", "    base_url: " + yamlScalar(endpoint), "    api_key: " + yamlScalar(key), "    api_mode: responses"}
 	if len(models) == 0 {
 		return lines
 	}
@@ -104,10 +108,10 @@ func mergeHermesProviderLines(existing []string, endpoint, key string, models []
 	}
 	result := append([]string(nil), existing...)
 	body := result[1:]
-	body = upsertYAMLLine(body, "base_url", "    base_url: "+endpoint)
-	body = upsertYAMLLine(body, "api_key", "    api_key: "+key)
+	body = upsertYAMLLine(body, "base_url", "    base_url: "+yamlScalar(endpoint))
+	body = upsertYAMLLine(body, "api_key", "    api_key: "+yamlScalar(key))
 	body = upsertYAMLLine(body, "api_mode", "    api_mode: responses")
-	if len(models) > 0 {
+	if models != nil {
 		filtered := make([]string, 0, len(body)+len(models)+2)
 		for index := 0; index < len(body); index++ {
 			line := body[index]
@@ -123,12 +127,30 @@ func mergeHermesProviderLines(existing []string, endpoint, key string, models []
 			}
 			filtered = append(filtered, line)
 		}
-		selected := selectedModelID(models, defaultModel)
-		filtered = append(filtered, "    model: "+strconv.Quote(selected), "    models:")
-		for _, model := range models {
-			filtered = append(filtered, "      "+strconv.Quote(model.ID)+": {}")
+		if len(models) > 0 {
+			selected := selectedModelID(models, defaultModel)
+			filtered = append(filtered, "    model: "+strconv.Quote(selected), "    models:")
+			for _, model := range models {
+				filtered = append(filtered, "      "+strconv.Quote(model.ID)+": {}")
+			}
 		}
 		body = filtered
 	}
 	return append([]string{result[0]}, body...)
+}
+
+func yamlScalar(value string) string {
+	if value != "" {
+		lower := strings.ToLower(value)
+		if strings.HasPrefix(value, "-") || strings.HasPrefix(value, ":") || lower == "null" || lower == "true" || lower == "false" || lower == "~" {
+			return strconv.Quote(value)
+		}
+		for _, r := range value {
+			if !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+				return strconv.Quote(value)
+			}
+		}
+		return value
+	}
+	return strconv.Quote(value)
 }

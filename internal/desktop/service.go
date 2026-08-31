@@ -42,6 +42,7 @@ type DesktopService struct {
 	needsOnboarding          bool
 	dogeMu                   sync.Mutex
 	updateMu                 sync.Mutex
+	clientConfigMu           sync.Mutex
 	failoverMu               sync.Mutex
 	dogeSyncing              bool
 	dogeSyncPhase            string

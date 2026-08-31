@@ -15,11 +15,20 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
     $("profileName").value = profile?.name || "";
     $("profileNote").value = profile?.note || "";
     $("baseUrl").value = profile?.baseUrl || "";
-    $("apiKey").value = profile?.apiKey || "";
+    // 完整密钥不再从状态快照返回。已有 Profile 留空提交表示保留后端密钥，
+    // 新建 Profile 仍要求填写；避免把脱敏提示误当成真实密钥保存。
+    const keyConfigured = Boolean(profile?.apiKeyConfigured);
+    const keyHint = profile?.apiKeyHint || "";
+    $("apiKey").value = "";
+    $("apiKey").required = !keyConfigured;
+    $("apiKey").placeholder = keyConfigured ? `已配置${keyHint ? `（${keyHint}）` : ""}，留空保持不变` : "sk-...";
+    $("apiKey").setAttribute("data-key-configured", String(keyConfigured));
+    $("copyApiKey").disabled = true;
+    $("fetchModels").disabled = !keyConfigured;
     const dogeKey = profile?.source === "doge";
     $("apiKey").readOnly = dogeKey;
     $("apiKey").setAttribute("aria-readonly", String(dogeKey));
-    $("apiKey").title = dogeKey ? "二狗子令牌密钥由远端管理，不能修改" : "";
+    $("apiKey").title = dogeKey ? "二狗子令牌密钥由远端管理，不能修改" : (keyConfigured ? "已配置密钥不会显示；留空表示保持不变" : "");
     $("headers").value = profile && Object.keys(profile.headers || {}).length ? JSON.stringify(profile.headers, null, 2) : "";
     drafts.editorModels = (profile?.models || []).map((model) => ({
       id: model.id || "", name: model.name || model.id || "", ownedBy: model.ownedBy || "", contextWindow: Number(model.contextWindow) > 0 ? Number(model.contextWindow) : 0,
@@ -28,7 +37,10 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
     setModelManagerStatus("");
     renderModelManager();
     $("activeBadge").classList.toggle("hidden", !profile?.active);
-    $("activateProfile").disabled = !profile || profile.active;
+    const activateButton = $("activateProfile");
+    activateButton.disabled = !profile;
+    const activateLabel = activateButton.querySelector("[data-button-label]");
+    if (activateLabel) activateLabel.textContent = profile?.active ? "重新配置" : "设为当前";
     $("testProfile").disabled = !profile;
     $("deleteProfile").disabled = !profile;
     updatePreview();
@@ -145,6 +157,7 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
     setButtonLoading(button, true, "获取中...");
     try {
       const models = await FetchProfileModels({
+        id: drafts.isNew ? "" : navigation.selectedId,
         baseUrl: $("baseUrl").value.trim(),
         apiKey: $("apiKey").value.trim(),
         headers,

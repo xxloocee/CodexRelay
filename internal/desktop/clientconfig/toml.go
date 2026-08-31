@@ -23,14 +23,17 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
 	foundTop := false
 	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "model_provider") && strings.Contains(line, "=") {
-			lines[i] = "model_provider = \"" + providerID + "\""
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			break
+		}
+		if tomlAssignmentKey(line) == "model_provider" {
+			lines[i] = "model_provider = " + strconv.Quote(providerID)
 			foundTop = true
 			break
 		}
 	}
 	if !foundTop {
-		lines = append([]string{"model_provider = \"" + providerID + "\""}, lines...)
+		lines = append([]string{"model_provider = " + strconv.Quote(providerID)}, lines...)
 	}
 	if strings.TrimSpace(defaultModel) != "" {
 		lines = upsertTomlTopLevelLine(lines, "model", strconv.Quote(defaultModel))
@@ -44,7 +47,7 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 		}
 	}
 	if start < 0 {
-		block := []string{"", header, "name = \"CodexRelay\"", "base_url = \"" + endpoint + "\"", "wire_api = \"responses\"", "requires_openai_auth = true"}
+		block := []string{"", header, "name = \"CodexRelay\"", "base_url = " + strconv.Quote(endpoint), "wire_api = \"responses\"", "requires_openai_auth = true"}
 		lines = append(lines, block...)
 	} else {
 		end := len(lines)
@@ -56,7 +59,7 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 		}
 		section := lines[start+1 : end]
 		section = upsertTomlLine(section, "name", "\"CodexRelay\"")
-		section = upsertTomlLine(section, "base_url", "\""+endpoint+"\"")
+		section = upsertTomlLine(section, "base_url", strconv.Quote(endpoint))
 		section = upsertTomlLine(section, "wire_api", "\"responses\"")
 		section = upsertTomlLine(section, "requires_openai_auth", "true")
 		lines = append(append(append([]string{}, lines[:start+1]...), section...), lines[end:]...)
@@ -65,27 +68,75 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 }
 
 func upsertTomlTopLevelLine(lines []string, key, value string) []string {
+	firstSection := len(lines)
 	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			firstSection = i
+			break
+		}
 		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
 			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"=") {
+			if tomlAssignmentKey(trimmed) == key {
 				lines[i] = key + " = " + value
 				return lines
 			}
 		}
 	}
-	return append([]string{key + " = " + value}, lines...)
+	lines = append(lines, "")
+	copy(lines[firstSection+1:], lines[firstSection:])
+	lines[firstSection] = key + " = " + value
+	return lines
+}
+
+func removeTomlTopLevelLine(lines []string, key string) []string {
+	firstSection := len(lines)
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			firstSection = i
+			break
+		}
+	}
+	result := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i < firstSection && len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			trimmed := strings.TrimSpace(line)
+			if tomlAssignmentKey(trimmed) == key {
+				continue
+			}
+		}
+		result = append(result, line)
+	}
+	return result
 }
 
 func upsertTomlLine(lines []string, key, value string) []string {
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"=") {
+		if tomlAssignmentKey(trimmed) == key {
 			lines[i] = key + " = " + value
 			return lines
 		}
 	}
 	return append(lines, key+" = "+value)
+}
+
+// tomlAssignmentKey returns the exact key on a simple TOML assignment line.
+// Prefix matching would treat keys such as model_provider_extra as the
+// managed model_provider setting and overwrite unrelated user configuration.
+func tomlAssignmentKey(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	parts := strings.SplitN(trimmed, "=", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	key := strings.TrimSpace(parts[0])
+	if key == "" || strings.ContainsAny(key, " \t") {
+		return ""
+	}
+	return key
 }
 
 func upsertTomlSectionValue(lines []string, sectionName, key, value string) []string {

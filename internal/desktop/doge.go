@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/desktop/clientconfig"
 )
 
 func (s *DesktopService) BindDoge(accessToken string) error {
@@ -281,102 +282,166 @@ func (s *DesktopService) RedeemDoge(code string) error {
 }
 
 func (s *DesktopService) EnableDogeToken(id int64) error {
-	return s.prepareDogeTokenProfile(id, true)
+	if id <= 0 {
+		return errors.New("二狗子令牌 ID 无效")
+	}
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
+	s.dogeMu.Lock()
+	defer s.dogeMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	next := config.Clone(state.Config)
+	profileID, err := upsertDogeTokenProfile(&next, id, true, "")
+	if err != nil {
+		return err
+	}
+	profileIndex := config.FindProfileIndex(next.Profiles, profileID)
+	if profileIndex < 0 {
+		return errors.New("二狗子代理 API 准备失败")
+	}
+	category := next.Profiles[profileIndex].Category
+	previousID := state.Config.ActiveProfiles[category]
+	var configResult clientconfig.ConfigureResult
+	entry := state.Config.ClientConfigs[category]
+	// 兼容旧绑定：只同步已经由 CodexRelay 接管的客户端；尚未接管的
+	// 外部配置仍须等待用户在主界面明确确认。
+	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
+		status, inspectErr := clientconfig.Inspect(state.Config, category)
+		if inspectErr != nil {
+			return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
+		}
+		if status.Status == "error" {
+			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
+		}
+		if status.Configured {
+			configResult, err = clientconfig.ConfigureWithResult(next, category, profileID)
+			if err != nil {
+				return fmt.Errorf("更新客户端配置失败: %w", err)
+			}
+		}
+	}
+	err = s.updateConfig(func(cfg *config.AppConfig) error {
+		committedID, commitErr := upsertDogeTokenProfile(cfg, id, true, profileID)
+		if commitErr != nil {
+			return commitErr
+		}
+		if committedID != profileID {
+			return errors.New("二狗子代理 API 已被并发修改，请重试")
+		}
+		if cfg.ActiveProfiles == nil {
+			cfg.ActiveProfiles = map[string]string{}
+		}
+		cfg.ActiveProfiles[category] = profileID
+		return nil
+	})
+	if err != nil {
+		if configResult.Rollback != nil {
+			if rollbackErr := configResult.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("启用二狗子令牌失败: %v；外部配置回退失败: %w", err, rollbackErr)
+			}
+		}
+		return err
+	}
+	if previousID != "" && previousID != profileID {
+		s.runtime.ResetProfileHealth(previousID)
+	}
+	return nil
 }
 
 // EditDogeToken 使用本地完整密钥创建或补全本地代理 API，但不改变当前启用映射。
 // 远端 group 不参与本地类别判断；令牌必须先完成本地类别选择。
 func (s *DesktopService) EditDogeToken(id int64) error {
-	return s.prepareDogeTokenProfile(id, false)
+	_, err := s.prepareDogeTokenProfile(id, false)
+	return err
 }
 
-func (s *DesktopService) prepareDogeTokenProfile(id int64, activate bool) error {
+func (s *DesktopService) prepareDogeTokenProfile(id int64, requireAvailable bool) (string, error) {
 	if id <= 0 {
-		return errors.New("二狗子令牌 ID 无效")
+		return "", errors.New("二狗子令牌 ID 无效")
 	}
-	state := s.runtime.State()
-	if state == nil {
-		return errors.New("程序尚未初始化")
-	}
-	if strings.TrimSpace(state.Config.Doge.AccessToken) == "" {
-		return errors.New("请先绑定二狗子访问令牌")
-	}
-
 	s.dogeMu.Lock()
 	defer s.dogeMu.Unlock()
-	current := s.runtime.State()
+	profileID := ""
+	err := s.updateConfig(func(cfg *config.AppConfig) error {
+		var updateErr error
+		profileID, updateErr = upsertDogeTokenProfile(cfg, id, requireAvailable, "")
+		return updateErr
+	})
+	return profileID, err
+}
+
+// upsertDogeTokenProfile mutates only the supplied in-memory config. Callers
+// can render external client files from a prospective clone, then commit the
+// same Profile ID together with ActiveProfiles in one runtime transaction.
+func upsertDogeTokenProfile(cfg *config.AppConfig, id int64, requireAvailable bool, preferredProfileID string) (string, error) {
+	if cfg == nil {
+		return "", errors.New("程序尚未初始化")
+	}
+	if strings.TrimSpace(cfg.Doge.AccessToken) == "" {
+		return "", errors.New("请先绑定二狗子访问令牌")
+	}
+	tokenIndex := -1
 	var remote config.DogeToken
-	for _, token := range current.Config.Doge.Tokens {
+	for index, token := range cfg.Doge.Tokens {
 		if token.ID == id {
+			tokenIndex = index
 			remote = token
 			break
 		}
 	}
 	if remote.ID == 0 {
-		return errors.New("二狗子令牌不存在，请先刷新目录")
+		return "", errors.New("二狗子令牌不存在，请先刷新目录")
 	}
 	if remote.Category == "" || !config.IsCategory(remote.Category) {
-		return errors.New("请先为二狗子令牌选择存放类别")
+		return "", errors.New("请先为二狗子令牌选择存放类别")
 	}
-	if activate && !dogeTokenAvailable(remote, current.Config.Doge.Groups) {
-		return errors.New("二狗子令牌当前分组不可用，不能启用")
+	if requireAvailable && !dogeTokenAvailable(remote, cfg.Doge.Groups) {
+		return "", errors.New("二狗子令牌当前分组不可用，不能启用")
 	}
 	remote.Key = normalizeDogeAPIKey(remote.Key)
 	if !isCompleteDogeAPIKey(remote.Key) {
-		return errors.New("本地没有完整 API 密钥，请先点击手动同步")
+		return "", errors.New("本地没有完整 API 密钥，请先点击手动同步")
 	}
 	if remote.Note == "" {
 		remote.Note = dogeTokenNote(remote)
 	}
-	return s.updateConfig(func(cfg *config.AppConfig) error {
-		index := -1
-		for i := range cfg.Doge.Tokens {
-			if cfg.Doge.Tokens[i].ID == id {
-				cfg.Doge.Tokens[i].Key = remote.Key
-				cfg.Doge.Tokens[i].Note = remote.Note
-				index = i
-				break
-			}
+	cfg.Doge.Tokens[tokenIndex].Key = remote.Key
+	cfg.Doge.Tokens[tokenIndex].Note = remote.Note
+	profileIndex := -1
+	for i := range cfg.Profiles {
+		if cfg.Profiles[i].Source == config.SourceDoge && cfg.Profiles[i].RemoteTokenID == id {
+			profileIndex = i
+			break
 		}
-		if index < 0 {
-			return errors.New("二狗子令牌已被刷新移除")
+	}
+	profile := config.Profile{
+		Source: config.SourceDoge, Category: remote.Category,
+		Name: remote.Name, BaseURL: strings.TrimRight(cfg.Doge.BaseURL, "/") + "/v1",
+		APIKey: remote.Key, Note: remote.Note, RemoteTokenID: id,
+	}
+	if profile.Name == "" {
+		profile.Name = "二狗子令牌 " + strconv.FormatInt(id, 10)
+	}
+	if profileIndex >= 0 {
+		// 编辑已导入令牌时保留用户修改过的名称、地址、备注、类别和请求头。
+		// 远端密钥是唯一由二狗子接口刷新覆盖的字段。
+		profile = cfg.Profiles[profileIndex]
+		profile.APIKey = remote.Key
+		if profile.Note == "" || strings.HasPrefix(profile.Note, "二狗子 · 分组：") {
+			profile.Note = remote.Note
 		}
-		profileIndex := -1
-		for i := range cfg.Profiles {
-			if cfg.Profiles[i].Source == config.SourceDoge && cfg.Profiles[i].RemoteTokenID == id {
-				profileIndex = i
-				break
-			}
-		}
-		profile := config.Profile{
-			Source: config.SourceDoge, Category: remote.Category,
-			Name: remote.Name, BaseURL: strings.TrimRight(cfg.Doge.BaseURL, "/") + "/v1",
-			APIKey: remote.Key, Note: remote.Note, RemoteTokenID: id,
-		}
-		if profile.Name == "" {
-			profile.Name = "二狗子令牌 " + strconv.FormatInt(id, 10)
-		}
-		if profileIndex >= 0 {
-			// 编辑已导入令牌时保留用户修改过的名称、地址、备注、类别和请求头。
-			// 远端密钥是唯一由二狗子接口刷新覆盖的字段。
-			profile = cfg.Profiles[profileIndex]
-			profile.APIKey = remote.Key
-			if profile.Note == "" || strings.HasPrefix(profile.Note, "二狗子 · 分组：") {
-				profile.Note = remote.Note
-			}
-			cfg.Profiles[profileIndex] = profile
-		} else {
+		cfg.Profiles[profileIndex] = profile
+	} else {
+		profile.ID = strings.TrimSpace(preferredProfileID)
+		if profile.ID == "" {
 			profile.ID = config.NewProfileID()
-			cfg.Profiles = append(cfg.Profiles, profile)
-			profileIndex = len(cfg.Profiles) - 1
 		}
-		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
-		if activate {
-			if cfg.ActiveProfiles == nil {
-				cfg.ActiveProfiles = map[string]string{}
-			}
-			cfg.ActiveProfiles[cfg.Profiles[profileIndex].Category] = cfg.Profiles[profileIndex].ID
-		}
-		return nil
-	})
+		cfg.Profiles = append(cfg.Profiles, profile)
+		profileIndex = len(cfg.Profiles) - 1
+	}
+	cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
+	return cfg.Profiles[profileIndex].ID, nil
 }

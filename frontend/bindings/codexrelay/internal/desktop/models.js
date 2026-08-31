@@ -71,6 +71,13 @@ export class DesktopState {
              */
             this["listenOnAllInterfaces"] = false;
         }
+		if (!("clientAccessHost" in $$source)) {
+			/**
+			 * @member
+			 * @type {string}
+			 */
+			this["clientAccessHost"] = "";
+		}
         if (!("proxyUrl" in $$source)) {
             /**
              * @member
@@ -1607,6 +1614,20 @@ export class PublicProfile {
              * @type {string}
              */
             this["apiKey"] = "";
+        }
+        if (!("apiKeyConfigured" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["apiKeyConfigured"] = false;
+        }
+        if (!("apiKeyHint" in $$source)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["apiKeyHint"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**

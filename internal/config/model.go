@@ -84,12 +84,37 @@ var Categories = []string{
 	CategoryOther,
 }
 
-// ClientConfig 保存外部 AI 客户端的配置目录和主配置文件名。
-// 路径由启动时按已知默认目录只读探测，用户也可以在高级设置中覆盖；不保存外部文件正文。
+// ClientConfig 保存外部 AI 客户端的配置目录和适配器固定的主配置文件名。
+// 目录由启动时按已知默认目录只读探测，用户也可以在高级设置中覆盖；文件名
+// 仅为兼容旧配置保留，写入前必须通过 ValidateClientConfig；不保存外部文件正文。
 type ClientConfig struct {
 	ConfigDir             string `json:"configDir,omitempty"`
 	ConfigFile            string `json:"configFile,omitempty"`
 	SkipConfigReplacement bool   `json:"skipConfigReplacement,omitempty"`
+}
+
+// ClientConfigFileFor 返回每个客户端唯一允许接管的配置文件名。
+// 配置文件名属于客户端协议适配器的固定边界，不能由用户任意指定，避免把
+// 配置写入到同一目录下的其他文件。空值表示使用该客户端的默认文件名。
+func ClientConfigFileFor(category string) (string, bool) {
+	switch category {
+	case CategoryCodex, CategoryGrok:
+		return "config.toml", true
+	case CategoryClaude:
+		return "settings.json", true
+	case CategoryGemini:
+		return ".env", true
+	case CategoryOpenCode:
+		return "opencode.json", true
+	case CategoryOpenClaw:
+		return "openclaw.json", true
+	case CategoryHermes:
+		return "config.yaml", true
+	case CategoryImage, CategoryOther:
+		return "", false
+	default:
+		return "", false
+	}
 }
 
 // ModelEntry 保存一个代理 API 可用的上游模型；目录来自用户主动获取或手动维护，不推断模型能力。
@@ -332,17 +357,20 @@ func NormalizeTaskNotification(notification TaskNotification) TaskNotification {
 type AppConfig struct {
 	ProxyPort int `json:"proxyPort"`
 	// ListenOnAllInterfaces 控制透明代理监听范围；关闭时仅接受本机回环请求，开启时监听所有 IPv4 网卡供 WSL2 访问。
-	ListenOnAllInterfaces bool                    `json:"listenOnAllInterfaces"`
-	LocalAccessToken      string                  `json:"localAccessToken"`
-	ActiveProfiles        map[string]string       `json:"activeProfiles"`
-	Profiles              []Profile               `json:"profiles"`
-	FailoverOrder         map[string][]string     `json:"failoverOrder"`
-	ClientConfigs         map[string]ClientConfig `json:"clientConfigs"`
-	Network               network.Settings        `json:"network"`
-	Preferences           Preferences             `json:"preferences"`
-	TaskNotification      TaskNotification        `json:"taskNotification"`
-	Doge                  DogeConnection          `json:"doge"`
-	TokenSwitch           TokenSwitchSettings     `json:"tokenSwitch"`
+	ListenOnAllInterfaces bool `json:"listenOnAllInterfaces"`
+	// ClientAccessHost 是写入外部客户端的访问主机。Windows 本机默认使用
+	// 127.0.0.1；客户端运行在 WSL2 时由用户改为 Windows 主机地址。
+	ClientAccessHost string                  `json:"clientAccessHost"`
+	LocalAccessToken string                  `json:"localAccessToken"`
+	ActiveProfiles   map[string]string       `json:"activeProfiles"`
+	Profiles         []Profile               `json:"profiles"`
+	FailoverOrder    map[string][]string     `json:"failoverOrder"`
+	ClientConfigs    map[string]ClientConfig `json:"clientConfigs"`
+	Network          network.Settings        `json:"network"`
+	Preferences      Preferences             `json:"preferences"`
+	TaskNotification TaskNotification        `json:"taskNotification"`
+	Doge             DogeConnection          `json:"doge"`
+	TokenSwitch      TokenSwitchSettings     `json:"tokenSwitch"`
 }
 
 // DefaultTokenSwitchSettings 返回兼容当前版本行为的故障处理默认值。
@@ -368,6 +396,7 @@ func Default(proxyPort int) AppConfig {
 	}
 	return AppConfig{
 		ProxyPort:        proxyPort,
+		ClientAccessHost: "127.0.0.1",
 		LocalAccessToken: newLocalAccessToken(),
 		Profiles:         []Profile{},
 		FailoverOrder:    map[string][]string{},

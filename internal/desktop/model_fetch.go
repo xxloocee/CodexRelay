@@ -51,6 +51,9 @@ func publicModels(models []config.ModelEntry) []PublicModel {
 }
 
 func modelInputsToConfig(models []ModelInput) []config.ModelEntry {
+	if models == nil {
+		return nil
+	}
 	if len(models) == 0 {
 		return []config.ModelEntry{}
 	}
@@ -62,6 +65,9 @@ func modelInputsToConfig(models []ModelInput) []config.ModelEntry {
 }
 
 func configModelsToInput(models []config.ModelEntry) []ModelInput {
+	if models == nil {
+		return nil
+	}
 	if len(models) == 0 {
 		return []ModelInput{}
 	}
@@ -244,5 +250,19 @@ func (s *DesktopService) fetchModels(baseURL, apiKey string, headers map[string]
 
 // FetchProfileModels 获取当前编辑器输入对应的上游模型目录；只读上游，不修改本地配置。
 func (s *DesktopService) FetchProfileModels(input ProfileInput) ([]PublicModel, error) {
+	input.BaseURL = strings.TrimSpace(input.BaseURL)
+	input.APIKey = strings.TrimSpace(input.APIKey)
+	if input.APIKey == "" && strings.TrimSpace(input.ID) != "" {
+		if state := s.runtime.State(); state != nil {
+			if index := config.FindProfileIndex(state.Config.Profiles, strings.TrimSpace(input.ID)); index >= 0 {
+				stored := state.Config.Profiles[index]
+				// 复用后端密钥时，请求地址和额外请求头也必须来自同一个
+				// 已保存 Profile，不能把密钥发送到前端指定的任意地址。
+				input.APIKey = strings.TrimSpace(stored.APIKey)
+				input.BaseURL = stored.BaseURL
+				input.Headers = stored.Headers
+			}
+		}
+	}
 	return s.fetchModels(input.BaseURL, input.APIKey, input.Headers)
 }

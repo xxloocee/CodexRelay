@@ -33,6 +33,13 @@ export function mountProfiles({
   });
   $("copyPreviewToken").addEventListener("click", () => copyText(serverState.snapshot?.localAccessToken || "-"));
   $("copyApiKey").addEventListener("click", () => copyText($("apiKey").value.trim()));
+  $("apiKey").addEventListener("input", () => {
+    // 已有密钥不会回填到输入框；只有用户明确输入新值时才允许复制。
+    const value = $("apiKey").value.trim();
+    $("copyApiKey").disabled = !value;
+    const storedKeyAvailable = $("apiKey").dataset.keyConfigured === "true" && Boolean(navigation.selectedId);
+    $("fetchModels").disabled = !value && !storedKeyAvailable;
+  });
   $("activateProfile").addEventListener("click", (event) => activateProfile(navigation.selectedId, event.currentTarget));
   $("testProfile").addEventListener("click", () => testProfile(navigation.selectedId, $("testProfile")));
   $("deleteProfile").addEventListener("click", (event) => deleteProfile(navigation.selectedId, event.currentTarget));

@@ -1,7 +1,7 @@
-import { BindDoge, CompleteOnboarding } from "../../core/desktop-api.js";
+import { BindDoge, CompleteOnboarding, ConfigureDetectedClients } from "../../core/desktop-api.js";
 import { $ } from "../../core/dom.js";
 import { errorMessage, setButtonLoading, toast } from "../../core/feedback.js";
-import { syncModalBody } from "../../core/modal.js";
+import { showConfirmDialog, syncModalBody } from "../../core/modal.js";
 import { runtimeState, serverState } from "../../core/store.js";
 
 export function createDogeOnboarding({ loadState, openDogeCategoryDialog }) {
@@ -37,8 +37,30 @@ export function createDogeOnboarding({ loadState, openDogeCategoryDialog }) {
       await BindDoge(token);
       input.value = "";
       await loadState();
+      let completionMessage = "二狗子已验证并绑定";
+      let completionError = false;
+      const detectedClients = (serverState.snapshot?.clientConfigs || [])
+        .filter((client) => client.detected && client.status !== "unsupported" && !client.skipConfigReplacement
+          && (!client.requiresProfile || serverState.snapshot?.activeProfiles?.[client.category]));
+      if (detectedClients.length) {
+        const labels = detectedClients.map((client) => client.label).join("、");
+        const accepted = await showConfirmDialog(
+          `检测到 ${labels} 已安装。是否现在备份原配置并配置全部客户端？`,
+          { title: "配置外部客户端", confirmLabel: "配置全部" },
+        );
+        if (accepted) {
+          try {
+            await ConfigureDetectedClients();
+            await loadState();
+            completionMessage = "二狗子已绑定，检测到的客户端已配置";
+          } catch (error) {
+            completionMessage = `账户已绑定，但客户端配置失败：${errorMessage(error)}`;
+            completionError = true;
+          }
+        }
+      }
       openDogeCategoryDialog(true);
-      toast("二狗子已验证并绑定");
+      toast(completionMessage, completionError);
     } catch (error) {
       errorNode.textContent = errorMessage(error);
       errorNode.classList.remove("hidden");
