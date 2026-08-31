@@ -21,10 +21,11 @@ import * as network$0 from "../network/models.js";
 import * as $models from "./models.js";
 
 /**
- * ActivateProfile 启用指定 Profile；可选的 configure 参数仅在用户确认时同步外部客户端。
- * 二狗子来源必须仍存在于最新目录且当前分组可用。
+ * ActivateProfile 启用指定 Profile。第二个参数用于明确控制是否同步外部
+ * 客户端配置：桌面端确认配置时传 true，用户跳过或兼容旧调用时传 false。
+ * 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
  * @param {string} id
- * @param {...boolean} configure
+ * @param {boolean[]} configure
  * @returns {$CancellablePromise<void>}
  */
 export function ActivateProfile(id, ...configure) {
@@ -87,7 +88,9 @@ export function ConfigureClient(category, profileID) {
 }
 
 /**
- * ConfigureDetectedClients 在用户明确确认后批量配置已检测到的外部客户端。
+ * ConfigureDetectedClients 在用户明确确认后批量接管已检测到的外部客户端。
+ * 它只处理配置注册表中已有目录且当前可读的客户端，不会创建未检测到的
+ * 配置文件；任一客户端失败时恢复此前已写入的全部文件。
  * @returns {$CancellablePromise<void>}
  */
 export function ConfigureDetectedClients() {
@@ -153,11 +156,31 @@ export function FetchProfileModels(input) {
 }
 
 /**
+ * @param {$models.DogeUsageAnalyticsQuery} input
+ * @returns {$CancellablePromise<$models.DogeBillingAnalysis>}
+ */
+export function GetDogeBillingAnalysis(input) {
+    return $Call.ByID(2483033099, input).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType4($result);
+    }));
+}
+
+/**
+ * @param {$models.DogeUsageAnalyticsQuery} input
+ * @returns {$CancellablePromise<$models.DogeUsageLogPage>}
+ */
+export function GetDogeUsageLogs(input) {
+    return $Call.ByID(813505150, input).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType5($result);
+    }));
+}
+
+/**
  * @returns {$CancellablePromise<$models.DesktopState>}
  */
 export function GetState() {
     return $Call.ByID(3062805628).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType4($result);
+        return $$createType6($result);
     }));
 }
 
@@ -247,7 +270,7 @@ export function ReorderProfiles(ids) {
 
 /**
  * SaveProfile 新增或更新一个本地 Profile，并规范化其类别故障顺序。
- * 保存成功后重新评估正在进行的自动轮次，使新 Profile 可以成为目录异常后的实时候选。
+ * 活动 Profile 的客户端渲染字段变更会先同步已接管的外部配置，再提交本地状态。
  * @param {$models.ProfileInput} input
  * @returns {$CancellablePromise<void>}
  */
@@ -262,6 +285,16 @@ export function SaveProfile(input) {
  */
 export function SelectDirectory(initialDirectory) {
     return $Call.ByID(1477342492, initialDirectory);
+}
+
+/**
+ * SetClientAccessHost 更新写入外部客户端的访问主机。监听端口和类别路径由
+ * config.json 的其他字段生成；已接管客户端在本地保存成功前统一同步并可回退。
+ * @param {string} raw
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetClientAccessHost(raw) {
+    return $Call.ByID(1540877308, raw);
 }
 
 /**
@@ -282,15 +315,6 @@ export function SetClientConfigPath(category, directory) {
  */
 export function SetClientConfigSkip(category, skip) {
     return $Call.ByID(2542801733, category, skip);
-}
-
-/**
- * SetClientAccessHost 更新写入外部客户端的访问主机。
- * @param {string} raw
- * @returns {$CancellablePromise<void>}
- */
-export function SetClientAccessHost(raw) {
-    return $Call.ByID(1540877308, raw);
 }
 
 /**
@@ -450,7 +474,7 @@ export function SyncDogeAnnouncements() {
  */
 export function TestProfile(id) {
     return $Call.ByID(2130459618, id).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType5($result);
+        return $$createType7($result);
     }));
 }
 
@@ -477,5 +501,7 @@ const $$createType0 = clientconfig$0.PublicClientConfig.createFrom;
 const $$createType1 = $models.UpdateInfo.createFrom;
 const $$createType2 = $models.PublicModel.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $models.DesktopState.createFrom;
-const $$createType5 = $models.TestResult.createFrom;
+const $$createType4 = $models.DogeBillingAnalysis.createFrom;
+const $$createType5 = $models.DogeUsageLogPage.createFrom;
+const $$createType6 = $models.DesktopState.createFrom;
+const $$createType7 = $models.TestResult.createFrom;

@@ -34,6 +34,8 @@ export const DismissDogeTokenSwitch = (...args) => callDesktop("DismissDogeToken
 export const EditDogeToken = (...args) => callDesktop("EditDogeToken", ...args);
 export const EnableDogeToken = (...args) => callDesktop("EnableDogeToken", ...args);
 export const FetchProfileModels = (...args) => callDesktop("FetchProfileModels", ...args);
+export const GetDogeBillingAnalysis = (...args) => callDesktop("GetDogeBillingAnalysis", ...args);
+export const GetDogeUsageLogs = (...args) => callDesktop("GetDogeUsageLogs", ...args);
 export const GetState = (...args) => callDesktop("GetState", ...args);
 export const InstallUpdate = (...args) => callDesktop("InstallUpdate", ...args);
 export const MarkDogeAnnouncementsRead = (...args) => callDesktop("MarkDogeAnnouncementsRead", ...args);

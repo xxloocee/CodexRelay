@@ -21,9 +21,10 @@ const (
 )
 
 type dogeEnvelope struct {
-	Data    json.RawMessage `json:"data"`
-	Message string          `json:"message"`
-	Success bool            `json:"success"`
+	Data       json.RawMessage `json:"data"`
+	GroupOrder []string        `json:"group_order"`
+	Message    string          `json:"message"`
+	Success    bool            `json:"success"`
 }
 
 // dogeHTTPError 保留上游 HTTP 状态，允许兼容接口缺少可选管理能力时继续同步。
@@ -48,6 +49,7 @@ func isDogeNotFound(err error) bool {
 type dogeStatusResponse struct {
 	AnnouncementsEnabled bool                      `json:"announcements_enabled"`
 	Announcements        []config.DogeAnnouncement `json:"announcements"`
+	QuotaPerUnit         float64                   `json:"quota_per_unit"`
 }
 
 type dogeTokenResponse struct {

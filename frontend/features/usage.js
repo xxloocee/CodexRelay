@@ -1,160 +1,154 @@
-import { ClearUsage } from "../core/desktop-api.js";
 import { $ } from "../core/dom.js";
-import { errorMessage, setButtonLoading, toast } from "../core/feedback.js";
-import { showConfirmDialog } from "../core/modal.js";
+import { setButtonLoading } from "../core/feedback.js";
 import { navigation, serverState } from "../core/store.js";
+import { createBillingAnalysis } from "./usage/billing.js";
+import { createUsageLogs } from "./usage/logs.js";
 
-export function createUsage({ loadState, nonHomeProfileName }) {
+export function createUsage() {
+  const loadingSources = new Set();
+  const logs = createUsageLogs({
+    onLoading: (loading) => setLoading("logs", loading),
+    onCountChange: (text) => setResultCount("logs", text),
+    groupName: displayGroupName,
+  });
+  const billing = createBillingAnalysis({
+    onLoading: (loading) => setLoading("billing", loading),
+    onCountChange: (text) => setResultCount("billing", text),
+    groupName: displayGroupName,
+  });
+
   function renderRequests() {
-    const rows = $("requestRows");
-    rows.replaceChildren();
-    renderUsageProfileOptions();
-    const allRequests = serverState.snapshot.requests || [];
-    const requests = allRequests.filter((request) => usageRequestMatches(request));
-    $("requestCount").textContent = requests.length === allRequests.length
-      ? requests.length + " 条请求"
-      : requests.length + " / " + allRequests.length + " 条请求";
-    $("emptyRequests").textContent = allRequests.length ? "当前范围暂无请求" : "暂无请求";
-    $("emptyRequests").classList.toggle("hidden", requests.length > 0);
-    renderUsageSummary();
-    for (const request of requests) {
-      const row = document.createElement("tr");
-      const reported = request.usageStatus === "reported";
-      row.append(
-        cell(formatRequestTime(request.startedAt)),
-        cell(nonHomeProfileName((serverState.snapshot.profiles || []).find((profile) => profile.id === request.profileId) || { name: request.profile || "-" })),
-        cell(request.model || "-"),
-        cell(request.method + " " + request.path, "path"),
-        cell(reported ? formatTokens(request.inputTokens) : "-", "token-value"),
-        cell(reported ? formatTokens(request.outputTokens) : "-", "token-value"),
-        cell(reported ? formatTokens(request.cachedTokens) : "-", "token-value"),
-        cell(reported ? formatTokens(request.totalTokens) : "未上报", reported ? "token-value total-token" : "usage-missing"),
-        cell(String(request.status), request.status >= 200 && request.status < 400 ? "status-ok" : "status-error"),
-        cell(request.durationMs + " ms"),
-      );
-      rows.appendChild(row);
+    renderFilterOptions();
+    renderSection();
+  }
+
+  function activate() {
+    renderRequests();
+    refresh();
+  }
+
+  function refresh() {
+    if (navigation.usageSection === "billing") return billing.load();
+    return logs.load(navigation.usagePage);
+  }
+
+  function setSection(section, { load = true } = {}) {
+    navigation.usageSection = section === "billing" ? "billing" : "logs";
+    renderSection();
+    if (load) refresh();
+  }
+
+  function renderSection() {
+    const section = navigation.usageSection === "billing" ? "billing" : "logs";
+    $("usageLogsView").classList.toggle("hidden", section !== "logs");
+    $("usageBillingView").classList.toggle("hidden", section !== "billing");
+    document.querySelectorAll("#usageSections button").forEach((button) => {
+      const active = button.dataset.section === section;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+  }
+
+  function renderFilterOptions() {
+    const doge = serverState.snapshot?.doge || {};
+    const tokens = uniqueOptions((doge.tokens || []).map((token) => ({ value: token.name, label: token.name })));
+    const groups = uniqueOptions((doge.groups || []).map((group) => ({ value: group, label: displayGroupName(group) })));
+    renderSelect("usageToken", "全部令牌", tokens, navigation.usageToken);
+    renderSelect("usageGroup", "全部分组", groups, navigation.usageGroup, displayGroupName(navigation.usageGroup));
+    $("usageModel").value = navigation.usageModel;
+    document.querySelectorAll("#usageRanges button").forEach((button) => button.classList.toggle("active", button.dataset.range === navigation.usageRange));
+  }
+
+  function displayGroupName(value) {
+    const group = String(value || "").trim();
+    if (!group) return "";
+    const doge = serverState.snapshot?.doge || {};
+    const configured = String(doge.groupDisplayNames?.[group] || "").trim();
+    if (configured) return configured;
+    const token = (doge.tokens || []).find((item) => item.group === group && item.groupDisplayName);
+    return String(token?.groupDisplayName || group);
+  }
+
+  function renderSelect(id, placeholder, options, current, currentLabel = current) {
+    const select = $(id);
+    select.replaceChildren(new Option(placeholder, ""));
+    const values = new Set();
+    for (const option of options) {
+      if (!option.value || values.has(option.value)) continue;
+      values.add(option.value);
+      select.appendChild(new Option(option.label, option.value));
     }
+    if (current && !values.has(current)) select.appendChild(new Option(currentLabel || current, current));
+    select.value = current || "";
   }
 
-  function renderUsageProfileOptions() {
-    const select = $("usageProfile");
-    const names = new Map((serverState.snapshot.profiles || []).map((profile) => [profile.id, nonHomeProfileName(profile)]));
-    for (const request of serverState.snapshot.requests || []) {
-      if (request.profileId && !names.has(request.profileId)) names.set(request.profileId, request.profile || "已删除中转站");
-    }
-    const current = navigation.usageProfile;
-    select.replaceChildren(new Option("全部代理 API", ""));
-    for (const [id, name] of names) select.appendChild(new Option(name, id));
-    if (current && names.has(current)) select.value = current;
-    else navigation.usageProfile = "";
+  function setLoading(source, loading) {
+    if (loading) loadingSources.add(source);
+    else loadingSources.delete(source);
+    setButtonLoading($("refreshUsage"), loadingSources.size > 0, "刷新中...");
   }
 
-  function usageRequestMatches(request) {
-    if (navigation.usageProfile && request.profileId !== navigation.usageProfile) return false;
-    const days = usageRangeDays(navigation.usageRange);
-    if (!days) return true;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (days - 1));
-    return new Date(request.startedAt) >= start;
+  function setResultCount(source, text) {
+    if (navigation.usageSection === source) $("usageResultCount").textContent = text;
   }
 
-  function usageRangeDays(range) {
-    if (range === "today") return 1;
-    if (range === "7d") return 7;
-    if (range === "30d") return 30;
-    return 0;
+  function resetPageAndRefresh() {
+    navigation.usagePage = 1;
+    refresh();
   }
 
-  function renderUsageSummary() {
-    const usage = serverState.snapshot.usage || { total: {}, profiles: {}, days: {} };
-    const aggregate = emptyUsageAggregate();
-    const days = usageRangeDays(navigation.usageRange);
-    if (!days) {
-      addUsageAggregate(aggregate, navigation.usageProfile ? usage.profiles?.[navigation.usageProfile] : usage.total);
-    } else {
-      const date = new Date();
-      date.setHours(12, 0, 0, 0);
-      for (let offset = 0; offset < days; offset++) {
-        const key = localDateKey(date);
-        const day = usage.days?.[key];
-        addUsageAggregate(aggregate, navigation.usageProfile ? day?.profiles?.[navigation.usageProfile] : day?.total);
-        date.setDate(date.getDate() - 1);
-      }
-    }
-    $("usageTotal").textContent = formatTokens(aggregate.totalTokens);
-    $("usageInput").textContent = formatTokens(aggregate.inputTokens);
-    $("usageOutput").textContent = formatTokens(aggregate.outputTokens);
-    $("usageCached").textContent = formatTokens(aggregate.cachedTokens);
-    $("usageRequests").textContent = formatTokens(aggregate.requests);
-    $("usageReported").textContent = aggregate.requests && aggregate.reportedRequests !== aggregate.requests
-      ? aggregate.reportedRequests + " 条已上报"
-      : "";
-  }
-
-  function emptyUsageAggregate() {
-    return { requests: 0, reportedRequests: 0, inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0 };
-  }
-
-  function addUsageAggregate(target, source) {
-    if (!source) return;
-    for (const key of Object.keys(target)) target[key] += Number(source[key] || 0);
-  }
-
-  function localDateKey(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  }
-
-  function formatTokens(value) {
-    return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
-  }
-
-  function formatRequestTime(value) {
-    const date = new Date(value);
-    const days = usageRangeDays(navigation.usageRange);
-    return days === 1
-      ? date.toLocaleTimeString("zh-CN", { hour12: false })
-      : date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
-  }
-
-  async function clearUsage() {
-    if (!(await showConfirmDialog("确定清空全部 Token 统计和最近请求明细吗？此操作无法恢复。", { title: "清空用量统计", danger: true }))) return;
-    const button = $("clearUsage");
-    setButtonLoading(button, true, "清空中...");
-    try {
-      await ClearUsage();
-      await loadState();
-      toast("用量统计已清空");
-    } catch (error) {
-      toast(errorMessage(error), true);
-    } finally {
-      setButtonLoading(button, false);
-    }
-  }
-
-  function cell(text, className = "") {
-    const td = document.createElement("td");
-    td.textContent = text;
-    td.title = text;
-    if (className) td.className = className;
-    return td;
+  function resetFilters() {
+    navigation.usageRange = "today";
+    navigation.usageToken = "";
+    navigation.usageModel = "";
+    navigation.usageGroup = "";
+    navigation.usagePage = 1;
+    renderFilterOptions();
+    refresh();
   }
 
   function mount() {
+    document.querySelectorAll("#usageSections button").forEach((button) => button.addEventListener("click", () => setSection(button.dataset.section)));
     document.querySelectorAll("#usageRanges button").forEach((button) => button.addEventListener("click", () => {
       navigation.usageRange = button.dataset.range;
       document.querySelectorAll("#usageRanges button").forEach((item) => item.classList.toggle("active", item === button));
-      renderRequests();
+      resetPageAndRefresh();
     }));
-    $("usageProfile").addEventListener("change", () => {
-      navigation.usageProfile = $("usageProfile").value;
-      renderRequests();
+    $("usageToken").addEventListener("change", () => {
+      navigation.usageToken = $("usageToken").value;
+      resetPageAndRefresh();
     });
-    $("clearUsage").addEventListener("click", clearUsage);
+    $("usageGroup").addEventListener("change", () => {
+      navigation.usageGroup = $("usageGroup").value;
+      resetPageAndRefresh();
+    });
+    $("usageModel").addEventListener("input", () => {
+      navigation.usageModel = $("usageModel").value.trim();
+    });
+    $("usageModel").addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      resetPageAndRefresh();
+    });
+    $("resetUsageFilters").addEventListener("click", resetFilters);
+    $("refreshUsage").addEventListener("click", refresh);
+    logs.mount();
+    billing.mount();
+    renderRequests();
   }
 
-  return { renderRequests, mount };
+  return { activate, mount, renderRequests };
+}
+
+function uniqueOptions(options) {
+  const seen = new Set();
+  return options.filter((option) => {
+    const value = String(option.value || "").trim();
+    if (!value || seen.has(value)) return false;
+    seen.add(value);
+    option.value = value;
+    option.label = String(option.label || value);
+    return true;
+  });
 }

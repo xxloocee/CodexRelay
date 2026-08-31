@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"codexrelay/internal/config"
@@ -22,16 +23,49 @@ func sanitizeDogeUser(user map[string]any) map[string]any {
 }
 
 func (s *DesktopService) fetchDogeGroups(ctx context.Context, client *http.Client, baseURL, accessToken string) ([]string, map[string]dogeGroupInfo, error) {
-	data, err := s.dogeRequestWithClient(ctx, client, baseURL, accessToken, http.MethodGet, "/api/user/self/groups")
+	envelope, err := s.dogeRequestEnvelopeWithClient(ctx, client, baseURL, accessToken, http.MethodGet, "/api/user/self/groups")
 	if err != nil {
 		return nil, nil, err
 	}
 	var raw any
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(envelope.Data, &raw); err != nil {
 		return nil, nil, fmt.Errorf("二狗子分组信息格式无效: %w", err)
 	}
 	groups, details := parseDogeGroups(raw)
-	return groups, details, nil
+	return orderDogeGroups(groups, envelope.GroupOrder), details, nil
+}
+
+func orderDogeGroups(groups, preferred []string) []string {
+	available := make(map[string]struct{}, len(groups))
+	for _, group := range uniqueStrings(groups) {
+		available[group] = struct{}{}
+	}
+	ordered := make([]string, 0, len(available))
+	for _, group := range uniqueStrings(preferred) {
+		if _, ok := available[group]; !ok {
+			continue
+		}
+		ordered = append(ordered, group)
+		delete(available, group)
+	}
+	remaining := make([]string, 0, len(available))
+	for group := range available {
+		remaining = append(remaining, group)
+	}
+	sort.Strings(remaining)
+	return append(ordered, remaining...)
+}
+
+func dogeGroupDisplayNames(groups []string, details map[string]dogeGroupInfo) map[string]string {
+	result := make(map[string]string, len(groups))
+	for _, group := range groups {
+		name := strings.TrimSpace(details[group].DisplayName)
+		if name == "" {
+			name = group
+		}
+		result[group] = name
+	}
+	return result
 }
 
 // parseDogeGroups 解析分组键与展示元数据；分组键用于匹配令牌，展示名和倍率只用于界面。

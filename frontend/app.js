@@ -188,8 +188,13 @@ const clientConfigsFeature = createClientConfigs({ loadState });
 const preferencesFeature = createPreferences({ loadState, visibleCategorySet, categoryLabel });
 const networkFeature = createNetwork({ loadState });
 const notificationsFeature = createNotifications({ loadState });
-const { mount: mountSettings } = createSettings({ showView });
-const usageFeature = createUsage({ loadState, nonHomeProfileName });
+const { mount: mountSettings } = createSettings({
+  showView,
+  onTabChange: (tab) => {
+    if (tab === "activity") usageFeature.activate();
+  },
+});
+const usageFeature = createUsage();
 
 mountGlobalEvents({ copyText });
 mountDogeAccount();

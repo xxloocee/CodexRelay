@@ -280,6 +280,7 @@ type DogeConnection struct {
 	Topup               DogeTopupInfo         `json:"topup"`
 	Notifications       DogeNotificationState `json:"notifications"`
 	Groups              []string              `json:"groups"`
+	GroupDisplayNames   map[string]string     `json:"groupDisplayNames"`
 	Tokens              []DogeToken           `json:"tokens"`
 	TokenOrder          []string              `json:"tokenOrder"`
 	LastSyncAt          time.Time             `json:"lastSyncAt,omitempty"`
@@ -405,7 +406,7 @@ func Default(proxyPort int) AppConfig {
 		Network:          network.Settings{Mode: "system"},
 		Preferences:      Preferences{CloseToTray: true, Theme: DefaultTheme, ColorMode: DefaultColorMode, VisibleCategories: append([]string(nil), Categories...), DefaultSource: "", DefaultCategory: CategoryCodex, RestoreViewMode: RestoreViewCurrent},
 		TaskNotification: TaskNotification{Events: DefaultTaskNotificationEvents(), EventsInitialized: true, IdleGraceSeconds: DefaultTaskNotificationIdleGraceSeconds, RequestTimeoutSeconds: DefaultTaskNotificationRequestTimeoutSeconds},
-		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{BalanceAlertEnabled: true, BalanceAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, BalanceAlertRecords: []DogeBalanceAlertRecord{}, SubscriptionAlertRecords: []DogeSubscriptionAlertRecord{}, Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
+		Doge:             DogeConnection{BaseURL: "https://api.ergouzi.life", SyncIntervalMinutes: DefaultDogeSyncIntervalMinutes, Notifications: DogeNotificationState{BalanceAlertEnabled: true, BalanceAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, SubscriptionAlertEnabled: true, SubscriptionAlertThresholdUSD: DefaultQuotaAlertThresholdUSD, BalanceAlertRecords: []DogeBalanceAlertRecord{}, SubscriptionAlertRecords: []DogeSubscriptionAlertRecord{}, Announcements: []DogeAnnouncement{}, ReadAnnouncementIDs: []int64{}, DismissedAlertKeys: []string{}}, Groups: []string{}, GroupDisplayNames: map[string]string{}, Tokens: []DogeToken{}, TokenOrder: []string{}},
 		TokenSwitch:      DefaultTokenSwitchSettings(),
 	}
 }
@@ -430,6 +431,10 @@ func Clone(source AppConfig) AppConfig {
 		clone.ClientConfigs[category] = client
 	}
 	clone.Doge.Groups = append([]string(nil), source.Doge.Groups...)
+	clone.Doge.GroupDisplayNames = make(map[string]string, len(source.Doge.GroupDisplayNames))
+	for group, name := range source.Doge.GroupDisplayNames {
+		clone.Doge.GroupDisplayNames[group] = name
+	}
 	clone.Doge.Tokens = make([]DogeToken, len(source.Doge.Tokens))
 	copy(clone.Doge.Tokens, source.Doge.Tokens)
 	clone.Doge.TokenOrder = append([]string(nil), source.Doge.TokenOrder...)

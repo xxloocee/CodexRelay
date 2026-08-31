@@ -57,6 +57,10 @@ func (s *DesktopService) GetState() DesktopState {
 	for _, category := range config.Categories {
 		proxyURLs[category] = clientconfig.ProxyURL(state.Config, category)
 	}
+	groupDisplayNames := make(map[string]string, len(state.Config.Doge.GroupDisplayNames))
+	for group, name := range state.Config.Doge.GroupDisplayNames {
+		groupDisplayNames[group] = name
+	}
 	publicSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
 	notificationSubscriptions := make([]PublicDogeSubscription, 0, len(state.Config.Doge.Subscriptions))
 	subscriptionsUSD := 0.0
@@ -81,7 +85,7 @@ func (s *DesktopService) GetState() DesktopState {
 		BaseURL: state.Config.Doge.BaseURL, Bound: strings.TrimSpace(state.Config.Doge.AccessToken) != "", Account: account,
 		WalletUSD: walletUSD, SubscriptionsUSD: subscriptionsUSD, TotalUSD: walletUSD + subscriptionsUSD,
 		Subscriptions: publicSubscriptions, RedemptionEnabled: state.Config.Doge.Topup.EnableRedemption, TopupLink: state.Config.Doge.Topup.TopupLink,
-		User: state.Config.Doge.User, Groups: append([]string(nil), state.Config.Doge.Groups...), Tokens: dogeTokens,
+		User: state.Config.Doge.User, Groups: append([]string(nil), state.Config.Doge.Groups...), GroupDisplayNames: groupDisplayNames, Tokens: dogeTokens,
 		Notifications:       publicDogeNotifications(state.Config.Doge, walletUSD, notificationSubscriptions, announcementSyncing),
 		BalanceAlertEnabled: state.Config.Doge.Notifications.BalanceAlertEnabled, BalanceAlertThresholdUSD: state.Config.Doge.Notifications.BalanceAlertThresholdUSD,
 		SubscriptionAlertEnabled: state.Config.Doge.Notifications.SubscriptionAlertEnabled, SubscriptionAlertThresholdUSD: state.Config.Doge.Notifications.SubscriptionAlertThresholdUSD,

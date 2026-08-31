@@ -9,8 +9,16 @@ export {
 
 export {
     DesktopState,
+    DogeBillingAnalysis,
+    DogeBillingOverviewItem,
+    DogeBillingRow,
+    DogeBillingSummary,
+    DogeBillingTokenMetrics,
     DogeState,
     DogeTokenCategoryInput,
+    DogeUsageAnalyticsQuery,
+    DogeUsageLog,
+    DogeUsageLogPage,
     ModelInput,
     ProfileInput,
     PublicClientConfig,

@@ -322,26 +322,53 @@
         </div>
         <div id="activityPanel" class="settings-panel hidden">
           <div class="panel-heading usage-panel-heading">
-             <div><h2>用量统计</h2><span id="requestCount" class="muted">0 条请求</span></div>
-            <div class="usage-toolbar">
-              <div id="usageRanges" class="usage-ranges segmented" role="group" aria-label="统计时间范围">
-                <button type="button" data-range="today">今天</button><button type="button" data-range="7d" class="active">7 天</button><button type="button" data-range="30d">30 天</button><button type="button" data-range="all">全部</button>
-              </div>
-               <select id="usageProfile" aria-label="筛选代理 API"><option value="">全部代理 API</option></select>
-              <button id="clearUsage" class="danger-button compact-button" type="button"><span class="icon icon-trash-2" aria-hidden="true"></span><span>清空</span></button>
+            <div class="usage-heading-copy"><h2>用量统计</h2><span id="usageResultCount" class="muted">new-api 普通用户数据</span></div>
+            <div class="usage-heading-actions"><button id="resetUsageFilters" class="secondary-button compact-button" type="button">重置</button><button id="refreshUsage" class="secondary-button compact-button" type="button" title="刷新当前数据"><span class="icon icon-refresh" aria-hidden="true"></span><span data-button-label>刷新</span></button></div>
+          </div>
+
+          <div id="usageSections" class="usage-view-tabs segmented" role="tablist" aria-label="用量统计视图">
+            <button id="usageLogsTab" class="active" type="button" role="tab" aria-selected="true" aria-controls="usageLogsView" data-section="logs">使用日志</button>
+            <button id="usageBillingTab" type="button" role="tab" aria-selected="false" aria-controls="usageBillingView" data-section="billing">计费分析</button>
+          </div>
+
+          <div class="usage-filters" aria-label="用量筛选器">
+            <div class="usage-filter-field usage-range-field"><label>时间范围</label><div id="usageRanges" class="usage-ranges segmented" role="group" aria-label="统计时间范围"><button type="button" data-range="today" class="active">今天</button><button type="button" data-range="7d">7 天</button><button type="button" data-range="30d">30 天</button><button type="button" data-range="all">全部</button></div></div>
+            <div class="usage-filter-field"><label for="usageToken">API 密钥</label><select id="usageToken"><option value="">全部令牌</option></select></div>
+            <div class="usage-filter-field"><label for="usageModel">模型</label><input id="usageModel" type="search" placeholder="全部模型" autocomplete="off"></div>
+            <div class="usage-filter-field"><label for="usageGroup">分组</label><select id="usageGroup"><option value="">全部分组</option></select></div>
+          </div>
+
+          <section id="usageLogsView" class="usage-view" role="tabpanel" aria-labelledby="usageLogsTab">
+            <div class="table-wrap usage-table-wrap">
+              <table class="usage-table usage-log-table"><thead><tr><th>时间</th><th>令牌</th><th>模型</th><th>流</th><th>Tokens</th><th>费用</th><th>耗时 / 首字</th><th>详情</th></tr></thead><tbody id="usageLogRows"></tbody></table>
+              <div id="usageLogsState" class="table-state">选择“使用日志”后加载数据</div>
             </div>
-          </div>
-          <div class="usage-summary" aria-label="Token 用量汇总">
-            <div><span>总 Token</span><strong id="usageTotal">0</strong></div>
-            <div><span>输入 Token</span><strong id="usageInput">0</strong></div>
-            <div><span>输出 Token</span><strong id="usageOutput">0</strong></div>
-            <div><span>缓存命中</span><strong id="usageCached">0</strong></div>
-            <div><span>请求数</span><strong id="usageRequests">0</strong><small id="usageReported"></small></div>
-          </div>
-          <div class="table-wrap">
-             <table class="usage-table"><thead><tr><th>时间</th><th>代理 API</th><th>模型</th><th>请求</th><th>输入</th><th>输出</th><th>缓存</th><th>总计</th><th>状态</th><th>耗时</th></tr></thead><tbody id="requestRows"></tbody></table>
-            <div id="emptyRequests" class="table-empty">暂无请求</div>
-          </div>
+            <div class="usage-pagination" aria-label="使用日志分页">
+              <span id="usagePageSummary" class="usage-pagination-summary">共 0 条 · 第 1 / 1 页</span>
+              <div id="usagePaginationControls" class="usage-pagination-controls">
+                <label class="usage-page-size" for="usagePageSize"><span>每页行数</span><select id="usagePageSize"><option value="10">10</option><option value="20" selected>20</option><option value="30">30</option><option value="40">40</option><option value="50">50</option><option value="100">100</option></select></label>
+                <div class="usage-page-navigation">
+                  <button id="usageFirstPage" class="secondary-button usage-page-icon-button" type="button" title="第一页" aria-label="第一页"><span class="icon icon-chevrons-left" aria-hidden="true"></span></button>
+                  <button id="usagePreviousPage" class="secondary-button usage-page-icon-button" type="button" title="上一页" aria-label="上一页"><span class="icon icon-chevron-left" aria-hidden="true"></span></button>
+                  <div id="usagePageNumbers" class="usage-page-numbers" aria-label="页码"></div>
+                  <button id="usageNextPage" class="secondary-button usage-page-icon-button" type="button" title="下一页" aria-label="下一页"><span class="icon icon-chevron-right" aria-hidden="true"></span></button>
+                  <button id="usageLastPage" class="secondary-button usage-page-icon-button" type="button" title="最后一页" aria-label="最后一页"><span class="icon icon-chevrons-right" aria-hidden="true"></span></button>
+                </div>
+                <div class="usage-page-jump"><input id="usagePageInput" type="number" min="1" value="1" inputmode="numeric" aria-label="跳转页码"><button id="usageJumpPage" class="secondary-button usage-page-icon-button" type="button" title="跳转到指定页" aria-label="跳转到指定页"><span class="icon icon-arrow-right" aria-hidden="true"></span></button></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="usageBillingView" class="usage-view usage-billing-view hidden" role="tabpanel" aria-labelledby="usageBillingTab">
+            <div id="usageBillingLoading" class="usage-page-loading hidden" role="status" aria-label="正在加载计费分析" aria-hidden="true"><span class="icon icon-load spin" aria-hidden="true"></span></div>
+            <div id="usageBillingState" class="usage-inline-state hidden"></div>
+            <div id="billingSummary" class="billing-summary-grid" aria-label="计费摘要"></div>
+            <div id="billingOverview" class="billing-overview-grid" aria-label="倍率分析"></div>
+            <section class="billing-dimensions" aria-labelledby="billingDimensionsHeading">
+              <div class="billing-section-heading"><div><h3 id="billingDimensionsHeading">计费维度</h3><span>按令牌、模型和分组查看消费构成</span></div><div id="billingDimensions" class="billing-dimension-tabs segmented" role="tablist" aria-label="计费维度"><button class="active" type="button" role="tab" aria-selected="true" data-dimension="tokens">令牌</button><button type="button" role="tab" aria-selected="false" data-dimension="models">模型</button><button type="button" role="tab" aria-selected="false" data-dimension="groups">分组</button></div></div>
+              <div class="table-wrap billing-dimension-table-wrap"><table class="billing-dimension-table"><thead><tr><th id="billingDimensionLabel">令牌</th><th>消费日志</th><th>日志 Tokens</th><th>余额消费</th><th>订阅抵扣</th><th>总消费</th><th>每 1M Tokens</th><th>最后使用</th></tr></thead><tbody id="billingDimensionRows"></tbody></table><div id="billingDimensionEmpty" class="table-state hidden">暂无数据</div></div>
+            </section>
+          </section>
         </div>
         <div id="aboutPanel" class="settings-panel hidden">
           <img class="about-mark" src="/logo.png" alt=""><h2>CodexRelay</h2><p id="aboutVersion" class="muted"></p>

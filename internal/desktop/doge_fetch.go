@@ -114,7 +114,7 @@ func (s *DesktopService) fetchDogeData(ctx context.Context, baseURL, accessToken
 			tokens[i].Note = dogeTokenNote(tokens[i])
 		}
 	}
-	return config.DogeConnection{BaseURL: baseURL, User: user, Account: account, Subscriptions: subscriptions, Topup: topup, Groups: groups, Tokens: tokens, LastSyncAt: time.Now()}, announcements, nil
+	return config.DogeConnection{BaseURL: baseURL, User: user, Account: account, Subscriptions: subscriptions, Topup: topup, Groups: groups, GroupDisplayNames: dogeGroupDisplayNames(groups, groupInfo), Tokens: tokens, LastSyncAt: time.Now()}, announcements, nil
 }
 
 // syncDogeTokenKeys 将令牌列表中的掩码与本地完整密钥分开处理。
