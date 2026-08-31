@@ -36,7 +36,7 @@ func (s *DesktopService) prepareProxyListener(port int, listenOnAllInterfaces bo
 
 func (s *DesktopService) serveProxy(server *http.Server, listener net.Listener) {
 	go func() {
-		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			application.Get().Logger.Error("透明代理异常退出", "error", err)
 		}
 	}()
@@ -72,6 +72,64 @@ func (s *DesktopService) installProxyListener(server *http.Server, listener net.
 	return true
 }
 
+// rebindProxyListenScope replaces a listener on the same port. Loopback and
+// wildcard addresses cannot be bound concurrently on common desktop systems,
+// so the old listener is closed first and restored if the new bind fails.
+// Callers must hold proxyMu for the complete configuration transaction.
+func (s *DesktopService) rebindProxyListenScope(port int, previous, next bool) (*http.Server, *http.Server, net.Listener, error) {
+	s.mu.Lock()
+	oldServer := s.server
+	oldListener := s.listener
+	if oldServer == nil && oldListener == nil {
+		s.mu.Unlock()
+		return nil, nil, nil, errors.New("代理监听尚未启动")
+	}
+	s.server = nil
+	s.listener = nil
+	s.mu.Unlock()
+	if oldListener != nil {
+		_ = oldListener.Close()
+	}
+
+	listener, server, err := s.prepareProxyListener(port, next)
+	if err != nil {
+		if restoreErr := s.restoreProxyListener(port, previous); restoreErr != nil {
+			return oldServer, nil, nil, fmt.Errorf("%v；恢复原监听失败: %w", err, restoreErr)
+		}
+		shutdownProxyServerAsync(oldServer)
+		return oldServer, nil, nil, err
+	}
+	return oldServer, server, listener, nil
+}
+
+func (s *DesktopService) attachProxyListener(server *http.Server, listener net.Listener) {
+	s.mu.Lock()
+	s.server = server
+	s.listener = listener
+	s.mu.Unlock()
+	s.serveProxy(server, listener)
+}
+
+func (s *DesktopService) restoreProxyListener(port int, listenOnAllInterfaces bool) error {
+	listener, server, err := s.prepareProxyListener(port, listenOnAllInterfaces)
+	if err != nil {
+		return err
+	}
+	s.attachProxyListener(server, listener)
+	return nil
+}
+
+func shutdownProxyServerAsync(server *http.Server) {
+	if server == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}()
+}
+
 func (s *DesktopService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
 	state := s.runtime.State()
 	if state == nil {
@@ -81,15 +139,14 @@ func (s *DesktopService) ServiceStartup(_ context.Context, _ application.Service
 	if err := s.scanClientConfigs(); err != nil {
 		application.Get().Logger.Warn("扫描外部客户端配置目录失败", "error", err)
 	}
+	s.proxyMu.Lock()
 	listener, server, err := s.prepareProxyListener(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces)
 	if err != nil {
+		s.proxyMu.Unlock()
 		return err
 	}
-	s.mu.Lock()
-	s.listener = listener
-	s.server = server
-	s.mu.Unlock()
-	s.serveProxy(server, listener)
+	s.attachProxyListener(server, listener)
+	s.proxyMu.Unlock()
 	s.mu.Lock()
 	if !s.taskNotifyStarted {
 		s.taskNotifyStarted = true
@@ -120,6 +177,8 @@ func (s *DesktopService) ServiceStartup(_ context.Context, _ application.Service
 }
 
 func (s *DesktopService) ServiceShutdown() error {
+	s.proxyMu.Lock()
+	defer s.proxyMu.Unlock()
 	s.mu.Lock()
 	server := s.server
 	cancel := s.syncCancel
