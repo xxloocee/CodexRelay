@@ -30,13 +30,20 @@ fi
 
 DIST_DIR="$PROJECT_ROOT/dist"
 PACKAGE_ROOT="$PROJECT_ROOT/build/linux/package-root"
+SHLIBDEPS_ROOT="$PROJECT_ROOT/build/linux/dpkg-shlibdeps"
 BINARY="$PACKAGE_ROOT/usr/bin/codexrelay"
 DEB="$DIST_DIR/CodexRelay-$VERSION-linux-$ARCH.deb"
 WAILS="github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.11"
 
 mkdir -p "$DIST_DIR"
 rm -rf "$PACKAGE_ROOT"
+rm -rf "$SHLIBDEPS_ROOT"
 rm -f "$DEB"
+
+cleanup() {
+  rm -rf "$SHLIBDEPS_ROOT"
+}
+trap cleanup EXIT
 
 export GOOS=linux
 export GOARCH="$ARCH"
@@ -56,7 +63,23 @@ go build -trimpath -tags production -ldflags "-s -w -X codexrelay/internal/deskt
 install -D -m 0644 "$PROJECT_ROOT/build/linux/codexrelay.desktop" "$PACKAGE_ROOT/usr/share/applications/codexrelay.desktop"
 install -D -m 0644 "$PROJECT_ROOT/logo.png" "$PACKAGE_ROOT/usr/share/icons/hicolor/512x512/apps/codexrelay.png"
 
-DEPENDENCIES="$(dpkg-shlibdeps -O -pcodexrelay -e "$BINARY" | sed -n 's/^shlibs:Depends=//p')"
+mkdir -p "$SHLIBDEPS_ROOT/debian"
+{
+  printf 'Source: codexrelay\n'
+  printf 'Section: utils\n'
+  printf 'Priority: optional\n'
+  printf 'Maintainer: CodexRelay <noreply@codexrelay.local>\n'
+  printf 'Standards-Version: 4.7.0\n\n'
+  printf 'Package: codexrelay\n'
+  printf 'Architecture: any\n'
+  printf 'Description: Codex API relay and account sync tool\n'
+  printf ' CodexRelay is a graphical local API relay and account sync tool.\n'
+} > "$SHLIBDEPS_ROOT/debian/control"
+
+DEPENDENCIES="$(
+  cd "$SHLIBDEPS_ROOT"
+  dpkg-shlibdeps -O -e "$BINARY" | sed -n 's/^shlibs:Depends=//p'
+)"
 mkdir -p "$PACKAGE_ROOT/DEBIAN"
 {
   printf 'Package: codexrelay\n'
