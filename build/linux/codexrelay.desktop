@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CodexRelay
+Comment=Codex API relay and account sync tool
+Exec=codexrelay
+Icon=codexrelay
+Terminal=false
+Categories=Development;Utility;

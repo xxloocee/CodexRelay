@@ -1,6 +1,6 @@
 # CodexRelay
 
-CodexRelay 是使用 Go + Wails v3 开发的 Windows 桌面程序，同时运行一个默认只监听本机回环地址的透明 API 反向代理。Codex 始终请求固定的本地地址，CodexRelay 将新请求转发给当前选中的上游并替换 API 密钥。
+CodexRelay 是使用 Go + Wails v3 开发的跨平台桌面程序，同时运行一个默认只监听本机回环地址的透明 API 反向代理。Codex 始终请求固定的本地地址，CodexRelay 将新请求转发给当前选中的上游并替换 API 密钥。
 
 程序默认不会读取或修改外部客户端配置；用户在高级设置中点击“配置”并确认后，才会按适配器写入对应配置，并为原文件创建 `.CodexRelay` 备份。程序不会修改 Windows 系统代理、路由、DNS、网卡或 VPN 设置。
 
@@ -93,8 +93,8 @@ Windows 版本启动后会检查官方 GitHub Release。发现新版本时，用
 
 ## GitHub 发布
 
-推送 `v` 开头的版本标签后，GitHub Actions 会自动构建并发布四个安装包、两个 Windows 应用内更新 EXE 和 `SHA256SUMS`。文件名中的
-`x64` 和 `arm64` 都是 64 位架构，当前不提供 32 位 `x86` 包：
+推送 `v` 开头的版本标签后，GitHub Actions 会自动构建并发布六个安装包、两个 Windows 应用内更新 EXE 和 `SHA256SUMS`。文件名中的
+`x64`、`amd64` 和 `arm64` 都是 64 位架构，当前不提供 32 位 `x86` 包：
 
 - Windows Intel/AMD：`CodexRelay-<版本>-windows-x64-setup.exe`
 - Windows ARM：`CodexRelay-<版本>-windows-arm64-setup.exe`
@@ -103,9 +103,13 @@ Windows 版本启动后会检查官方 GitHub Release。发现新版本时，用
 - Windows 更新校验：`SHA256SUMS`
 - macOS Intel：`CodexRelay-<版本>-macos-x64.dmg`
 - macOS Apple 芯片（M1/M2/M3/M4）：`CodexRelay-<版本>-macos-arm64.dmg`
+- Linux Intel/AMD（提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-amd64.deb`
+- Linux ARM64（提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-arm64.deb`
 
 选择方法：Windows 在“设置 > 系统 > 系统信息”的“系统类型”查看；macOS 在“关于本机”中，
-显示 Intel 处理器时选 `x64`，显示 Apple 芯片时选 `arm64`。
+显示 Intel 处理器时选 `x64`，显示 Apple 芯片时选 `arm64`；Linux 可用 `uname -m` 判断，
+显示 `x86_64` 时选 `amd64`，显示 `aarch64` 或 `arm64` 时选 `arm64`。提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu 可使用
+`sudo apt install ./CodexRelay-<版本>-linux-<架构>.deb` 安装。
 
 ```bash
 git tag v1.0.0
