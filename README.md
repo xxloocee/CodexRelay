@@ -103,12 +103,12 @@ Windows 版本启动后会检查官方 GitHub Release。发现新版本时，用
 - Windows 更新校验：`SHA256SUMS`
 - macOS Intel：`CodexRelay-<版本>-macos-x64.dmg`
 - macOS Apple 芯片（M1/M2/M3/M4）：`CodexRelay-<版本>-macos-arm64.dmg`
-- Linux Intel/AMD（提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-amd64.deb`
-- Linux ARM64（提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-arm64.deb`
+- Linux Intel/AMD（提供 `libwebkitgtk-6.0` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-amd64.deb`
+- Linux ARM64（提供 `libwebkitgtk-6.0` 的 Debian/Ubuntu）：`CodexRelay-<版本>-linux-arm64.deb`
 
 选择方法：Windows 在“设置 > 系统 > 系统信息”的“系统类型”查看；macOS 在“关于本机”中，
 显示 Intel 处理器时选 `x64`，显示 Apple 芯片时选 `arm64`；Linux 可用 `uname -m` 判断，
-显示 `x86_64` 时选 `amd64`，显示 `aarch64` 或 `arm64` 时选 `arm64`。提供 `libwebkit2gtk-4.1` 的 Debian/Ubuntu 可使用
+显示 `x86_64` 时选 `amd64`，显示 `aarch64` 或 `arm64` 时选 `arm64`。提供 `libwebkitgtk-6.0` 的 Debian/Ubuntu 可使用
 `sudo apt install ./CodexRelay-<版本>-linux-<架构>.deb` 安装。
 
 ```bash
