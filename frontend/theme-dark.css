@@ -47,7 +47,8 @@
   .doge-account-item,
   .modal-panel,
   .announcement-panel,
-  .doge-quota-popover
+  .doge-quota-popover,
+  .shortcut-keys kbd
 ) {
   border-color: var(--line);
   background: var(--panel);
@@ -209,7 +210,8 @@
 ) { color: var(--muted); }
 
 :root[data-color-mode="dark"] .segmented button.active { color: var(--on-accent); }
-:root[data-color-mode="dark"] .usage-page-number.active { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); }
+:root[data-color-mode="dark"] .usage-page-number.active { border: 0; background: var(--accent-fill); color: var(--on-accent); }
+:root[data-color-mode="dark"] .usage-page-number.active:hover { background: var(--accent-fill-hover); }
 
 :root[data-color-mode="dark"] :is(
   .task-notification-card-header,

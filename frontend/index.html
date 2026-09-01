@@ -149,7 +149,7 @@
       <div class="settings-shell">
         <nav id="settingsTabs" class="settings-tabs" aria-label="设置分类">
           <div class="settings-nav-head"><strong>设置</strong><span>CodexRelay</span></div>
-          <button class="active" type="button" data-tab="general">通用</button><button type="button" data-tab="network">网络</button><button type="button" data-tab="taskNotification">消息通知</button><button type="button" data-tab="connection">连接</button><button type="button" data-tab="advanced">高级</button><button type="button" data-tab="activity">用量统计</button><button type="button" data-tab="about">关于</button>
+          <button class="active" type="button" data-tab="general">通用</button><button type="button" data-tab="shortcuts">快捷键</button><button type="button" data-tab="network">网络</button><button type="button" data-tab="taskNotification">消息通知</button><button type="button" data-tab="connection">连接</button><button type="button" data-tab="advanced">高级</button><button type="button" data-tab="activity">用量统计</button><button type="button" data-tab="about">关于</button>
         </nav>
         <main id="settingsContent" class="settings-content">
         <div id="generalPanel" class="settings-panel">
@@ -233,6 +233,14 @@
               </div>
             </div>
           </section>
+        </div>
+        <div id="shortcutsPanel" class="settings-panel hidden">
+          <div class="panel-heading"><div><span class="panel-kicker">键盘操作</span><h2>快捷键</h2><p class="panel-description">用于快速调整界面文字显示比例，后续可在此继续添加快捷键。</p></div></div>
+          <div class="shortcut-list" aria-label="快捷键列表">
+            <div class="shortcut-row"><span><strong>放大界面文字</strong><small>每次增加 10%，最高 150%</small></span><span class="shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>=</kbd></span></div>
+            <div class="shortcut-row"><span><strong>缩小界面文字</strong><small>每次减少 10%，最低 80%</small></span><span class="shortcut-keys"><kbd>Ctrl</kbd><span>+</span><kbd>-</kbd></span></div>
+            <div class="shortcut-row shortcut-scale-row"><span><strong>当前界面文字比例</strong><small>比例会自动保存在当前设备</small></span><span class="shortcut-scale-control"><strong id="uiScaleValue">100%</strong><button id="resetUiScale" class="secondary-button compact-button" type="button"><span class="icon icon-refresh" aria-hidden="true"></span><span data-button-label>恢复默认</span></button></span></div>
+          </div>
         </div>
         <div id="networkPanel" class="settings-panel hidden">
           <div class="panel-heading"><div><span class="panel-kicker">出站连接</span><h2>网络出口</h2><p class="panel-description">选择二狗子同步和代理上游请求使用的网络出口。</p><span id="systemProxyState" class="muted"></span></div></div>

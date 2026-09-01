@@ -30,6 +30,7 @@ import { createSettings } from "./features/settings/index.js";
 import { createNetwork } from "./features/settings/network.js";
 import { createNotifications } from "./features/settings/notifications.js";
 import { createPreferences } from "./features/settings/preferences.js";
+import { createShortcuts } from "./features/settings/shortcuts.js";
 
 registerExternalLinkHandler((error) => toast(errorMessage(error), true));
 
@@ -187,6 +188,7 @@ const {
 connectionFeature = createConnection({ isDogeSyncing, formatDogeUSD });
 const clientConfigsFeature = createClientConfigs({ loadState });
 const preferencesFeature = createPreferences({ loadState, visibleCategorySet, categoryLabel });
+const shortcutsFeature = createShortcuts();
 const networkFeature = createNetwork({ loadState });
 const notificationsFeature = createNotifications({ loadState });
 const { mount: mountSettings } = createSettings({
@@ -203,6 +205,7 @@ mountUpdates();
 usageFeature.mount();
 mountProfileActivation();
 preferencesFeature.mount();
+shortcutsFeature.mount();
 networkFeature.mount();
 notificationsFeature.mount();
 mountSettings();

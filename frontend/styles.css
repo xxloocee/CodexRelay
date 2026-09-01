@@ -500,6 +500,16 @@ input[readonly]:focus { border-color: #d8dbe0; box-shadow: none; }
 .panel-heading h2 { margin-bottom: 5px; }
 .panel-kicker { display: block; margin-bottom: 7px; color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .04em; }
 .panel-description { margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.shortcut-list { border-top: 1px solid var(--line); }
+.shortcut-row { min-height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
+.shortcut-row > span:first-child { min-width: 0; display: grid; gap: 5px; }
+.shortcut-row strong { font-size: 14px; font-weight: 650; }
+.shortcut-row small { color: var(--muted); font-size: 12px; }
+.shortcut-keys { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+.shortcut-keys kbd { min-width: 31px; min-height: 28px; display: inline-grid; place-items: center; padding: 3px 8px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); color: #3c4651; font-family: inherit; font-size: 12px; font-weight: 650; }
+.shortcut-scale-row { min-height: 82px; }
+.shortcut-scale-control { display: inline-flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.shortcut-scale-control > strong { min-width: 52px; color: var(--blue); text-align: right; font-variant-numeric: tabular-nums; }
 .usage-panel-heading { align-items: center; margin-bottom: 16px; }
 .usage-heading-copy { min-width: 0; }
 .usage-heading-copy h2 { margin-bottom: 5px; }
@@ -568,7 +578,7 @@ input[readonly]:focus { border-color: #d8dbe0; box-shadow: none; }
 .usage-page-jump input { width: 58px; min-height: 34px; padding: 0 7px; text-align: center; }
 .usage-page-size select:focus, .usage-page-jump input:focus { border-color: var(--blue); box-shadow: 0 0 0 2px rgba(22, 135, 248, .11); }
 .usage-page-icon-button, .usage-page-number { width: 34px; min-width: 34px; min-height: 34px; padding: 0; font-variant-numeric: tabular-nums; }
-.usage-page-number.active { border-color: transparent; background: var(--accent-fill); color: var(--on-accent); font-weight: 700; }
+.usage-page-number.active { border: 0; border-radius: 6px; background: var(--accent-fill); color: var(--on-accent); font-weight: 700; }
 .usage-page-number.active:hover { background: var(--accent-fill-hover); }
 .usage-page-ellipsis { width: 18px; display: inline-grid; place-items: center; color: var(--muted); font-size: 13px; }
 .usage-inline-state { min-height: 54px; display: grid; place-items: center; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); }
@@ -935,6 +945,9 @@ body.modal-open { overflow: hidden; padding-right: var(--modal-scrollbar-compens
   .settings-nav-head { display: none; }
   .settings-tabs button { min-height: 36px; padding: 0 8px; text-align: center; }
   .settings-tabs button.active { box-shadow: inset 0 -3px 0 var(--blue); }
+  .shortcut-row { align-items: flex-start; flex-direction: column; gap: 10px; padding: 14px 0; }
+  .shortcut-scale-row { min-height: 0; }
+  .shortcut-keys, .shortcut-scale-control { align-self: flex-end; }
   .usage-panel-heading { align-items: flex-start; flex-direction: column; }
   .usage-heading-actions { width: 100%; }
   .usage-view-tabs.segmented { width: 100%; }

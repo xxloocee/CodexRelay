@@ -1,7 +1,7 @@
 import { $ } from "../../core/dom.js";
 import { navigation } from "../../core/store.js";
 
-const panelNames = ["general", "network", "taskNotification", "connection", "advanced", "activity", "about"];
+const panelNames = ["general", "shortcuts", "network", "taskNotification", "connection", "advanced", "activity", "about"];
 
 export function createSettings({ showView, onTabChange = () => {} }) {
   function setSettingsTab(tab) {
