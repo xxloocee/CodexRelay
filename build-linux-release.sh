@@ -51,7 +51,7 @@ while IFS= read -r -d '' script; do
 done < <(find "$PROJECT_ROOT/frontend" -type f -name '*.js' ! -path '*/bindings/*' ! -path '*/vendor/*' -print0)
 
 mkdir -p "$(dirname "$BINARY")"
-go build -trimpath -tags 'production gtk3' -ldflags "-s -w -X codexrelay/internal/desktop.applicationVersion=$VERSION" -o "$BINARY" ./cmd
+go build -trimpath -tags production -ldflags "-s -w -X codexrelay/internal/desktop.applicationVersion=$VERSION" -o "$BINARY" ./cmd
 
 install -D -m 0644 "$PROJECT_ROOT/build/linux/codexrelay.desktop" "$PACKAGE_ROOT/usr/share/applications/codexrelay.desktop"
 install -D -m 0644 "$PROJECT_ROOT/logo.png" "$PACKAGE_ROOT/usr/share/icons/hicolor/512x512/apps/codexrelay.png"
