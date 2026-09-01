@@ -56,7 +56,7 @@ go build -trimpath -tags production -ldflags "-s -w -X codexrelay/internal/deskt
 install -D -m 0644 "$PROJECT_ROOT/build/linux/codexrelay.desktop" "$PACKAGE_ROOT/usr/share/applications/codexrelay.desktop"
 install -D -m 0644 "$PROJECT_ROOT/logo.png" "$PACKAGE_ROOT/usr/share/icons/hicolor/512x512/apps/codexrelay.png"
 
-DEPENDENCIES="$(dpkg-shlibdeps -O -e "$BINARY" | sed -n 's/^shlibs:Depends=//p')"
+DEPENDENCIES="$(dpkg-shlibdeps -O -pcodexrelay -e "$BINARY" | sed -n 's/^shlibs:Depends=//p')"
 mkdir -p "$PACKAGE_ROOT/DEBIAN"
 {
   printf 'Package: codexrelay\n'
