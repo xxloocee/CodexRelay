@@ -56,6 +56,13 @@ export class DesktopState {
              */
             this["dataDirectory"] = "";
         }
+        if (!("clientBackupDirectory" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["clientBackupDirectory"] = "";
+        }
         if (!("proxyPort" in $$source)) {
             /**
              * @member
@@ -200,58 +207,58 @@ export class DesktopState {
      * @returns {DesktopState}
      */
     static createFrom($$source = {}) {
-        const $$createField8_0 = $$createType0;
-        const $$createField10_0 = $$createType0;
-        const $$createField11_0 = $$createType2;
-        const $$createField12_0 = $$createType4;
-        const $$createField13_0 = $$createType6;
-        const $$createField14_0 = $$createType7;
-        const $$createField15_0 = $$createType8;
-        const $$createField16_0 = $$createType10;
-        const $$createField17_0 = $$createType11;
-        const $$createField19_0 = $$createType12;
-        const $$createField20_0 = $$createType13;
-        const $$createField21_0 = $$createType14;
-        const $$createField22_0 = $$createType15;
+        const $$createField9_0 = $$createType0;
+        const $$createField11_0 = $$createType0;
+        const $$createField12_0 = $$createType2;
+        const $$createField13_0 = $$createType4;
+        const $$createField14_0 = $$createType6;
+        const $$createField15_0 = $$createType7;
+        const $$createField16_0 = $$createType8;
+        const $$createField17_0 = $$createType10;
+        const $$createField18_0 = $$createType11;
+        const $$createField20_0 = $$createType12;
+        const $$createField21_0 = $$createType13;
+        const $$createField22_0 = $$createType14;
+        const $$createField23_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("proxyUrls" in $$parsedSource) {
-            $$parsedSource["proxyUrls"] = $$createField8_0($$parsedSource["proxyUrls"]);
+            $$parsedSource["proxyUrls"] = $$createField9_0($$parsedSource["proxyUrls"]);
         }
         if ("activeProfiles" in $$parsedSource) {
-            $$parsedSource["activeProfiles"] = $$createField10_0($$parsedSource["activeProfiles"]);
+            $$parsedSource["activeProfiles"] = $$createField11_0($$parsedSource["activeProfiles"]);
         }
         if ("profiles" in $$parsedSource) {
-            $$parsedSource["profiles"] = $$createField11_0($$parsedSource["profiles"]);
+            $$parsedSource["profiles"] = $$createField12_0($$parsedSource["profiles"]);
         }
         if ("failoverOrder" in $$parsedSource) {
-            $$parsedSource["failoverOrder"] = $$createField12_0($$parsedSource["failoverOrder"]);
+            $$parsedSource["failoverOrder"] = $$createField13_0($$parsedSource["failoverOrder"]);
         }
         if ("clientConfigs" in $$parsedSource) {
-            $$parsedSource["clientConfigs"] = $$createField13_0($$parsedSource["clientConfigs"]);
+            $$parsedSource["clientConfigs"] = $$createField14_0($$parsedSource["clientConfigs"]);
         }
         if ("network" in $$parsedSource) {
-            $$parsedSource["network"] = $$createField14_0($$parsedSource["network"]);
+            $$parsedSource["network"] = $$createField15_0($$parsedSource["network"]);
         }
         if ("systemProxy" in $$parsedSource) {
-            $$parsedSource["systemProxy"] = $$createField15_0($$parsedSource["systemProxy"]);
+            $$parsedSource["systemProxy"] = $$createField16_0($$parsedSource["systemProxy"]);
         }
         if ("requests" in $$parsedSource) {
-            $$parsedSource["requests"] = $$createField16_0($$parsedSource["requests"]);
+            $$parsedSource["requests"] = $$createField17_0($$parsedSource["requests"]);
         }
         if ("usage" in $$parsedSource) {
-            $$parsedSource["usage"] = $$createField17_0($$parsedSource["usage"]);
+            $$parsedSource["usage"] = $$createField18_0($$parsedSource["usage"]);
         }
         if ("preferences" in $$parsedSource) {
-            $$parsedSource["preferences"] = $$createField19_0($$parsedSource["preferences"]);
+            $$parsedSource["preferences"] = $$createField20_0($$parsedSource["preferences"]);
         }
         if ("tokenSwitch" in $$parsedSource) {
-            $$parsedSource["tokenSwitch"] = $$createField20_0($$parsedSource["tokenSwitch"]);
+            $$parsedSource["tokenSwitch"] = $$createField21_0($$parsedSource["tokenSwitch"]);
         }
         if ("taskNotification" in $$parsedSource) {
-            $$parsedSource["taskNotification"] = $$createField21_0($$parsedSource["taskNotification"]);
+            $$parsedSource["taskNotification"] = $$createField22_0($$parsedSource["taskNotification"]);
         }
         if ("doge" in $$parsedSource) {
-            $$parsedSource["doge"] = $$createField22_0($$parsedSource["doge"]);
+            $$parsedSource["doge"] = $$createField23_0($$parsedSource["doge"]);
         }
         return new DesktopState(/** @type {Partial<DesktopState>} */($$parsedSource));
     }

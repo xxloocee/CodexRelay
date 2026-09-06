@@ -8,11 +8,12 @@ import (
 )
 
 type DesktopState struct {
-	Version         string `json:"version"`
-	UpdateSupported bool   `json:"updateSupported"`
-	NeedsOnboarding bool   `json:"needsOnboarding"`
-	DataDirectory   string `json:"dataDirectory"`
-	ProxyPort       int    `json:"proxyPort"`
+	Version               string `json:"version"`
+	UpdateSupported       bool   `json:"updateSupported"`
+	NeedsOnboarding       bool   `json:"needsOnboarding"`
+	DataDirectory         string `json:"dataDirectory"`
+	ClientBackupDirectory string `json:"clientBackupDirectory"`
+	ProxyPort             int    `json:"proxyPort"`
 	// ListenOnAllInterfaces 是网络设置页展示的监听范围，不代表当前出站网络出口。
 	ListenOnAllInterfaces bool                       `json:"listenOnAllInterfaces"`
 	ClientAccessHost      string                     `json:"clientAccessHost"`

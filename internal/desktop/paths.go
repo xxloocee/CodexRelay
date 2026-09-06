@@ -59,6 +59,35 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 	if directory == "" || !filepath.IsAbs(directory) {
 		return errors.New("CodexRelay 数据目录必须是绝对路径")
 	}
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
+	oldDataDirectory := s.runtime.DataDirectory()
+	if filepath.Clean(oldDataDirectory) == directory {
+		return nil
+	}
+	backupSource := filepath.Join(oldDataDirectory, "client-backups")
+	backupTarget := filepath.Join(directory, "client-backups")
+	if relative, relErr := filepath.Rel(backupSource, directory); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("目标数据目录不能位于客户端备份目录内")
+	}
+	copiedClientBackups := false
+	if _, targetErr := os.Stat(backupTarget); targetErr == nil {
+		return errors.New("目标数据目录已存在客户端备份，拒绝覆盖")
+	} else if !errors.Is(targetErr, os.ErrNotExist) {
+		return fmt.Errorf("检查目标客户端备份失败: %w", targetErr)
+	}
+	if info, statErr := os.Stat(backupSource); statErr == nil {
+		if !info.IsDir() {
+			return errors.New("客户端备份源路径不是目录，拒绝迁移")
+		}
+		if err := copyDirectory(backupSource, backupTarget); err != nil {
+			_ = os.RemoveAll(backupTarget)
+			return fmt.Errorf("迁移客户端备份失败: %w", err)
+		}
+		copiedClientBackups = true
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("检查客户端备份源失败: %w", statErr)
+	}
 	migrate := func() (string, error) {
 		return s.runtime.MigrateDataDirectory(directory, func() error {
 			return config.SaveDataDirectoryPointer(directory)
@@ -73,6 +102,9 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 		oldDirectory, err = migrate()
 	}
 	if err != nil {
+		if copiedClientBackups {
+			_ = os.RemoveAll(backupTarget)
+		}
 		if s.taskNotifier != nil {
 			return fmt.Errorf("迁移任务通知状态失败: %w", err)
 		}
@@ -86,10 +118,34 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 	if filepath.Clean(oldDirectory) != directory {
 		for _, name := range []string{"config.json", "usage.json"} {
 			if removeErr := os.Remove(filepath.Join(oldDirectory, name)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-				return fmt.Errorf("清理旧数据文件 %s 失败: %w", name, removeErr)
+				application.Get().Logger.Warn("旧数据文件清理失败", "file", name, "error", removeErr)
 			}
+		}
+		if removeErr := os.RemoveAll(filepath.Join(oldDirectory, "client-backups")); removeErr != nil {
+			application.Get().Logger.Warn("旧客户端备份清理失败", "error", removeErr)
 		}
 	}
 	s.notifyStateChanged()
 	return nil
+}
+
+func copyDirectory(source, target string) error {
+	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if info.IsDir() {
+			return os.MkdirAll(destination, info.Mode().Perm())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destination, data, info.Mode().Perm())
+	})
 }

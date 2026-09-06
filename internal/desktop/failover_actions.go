@@ -94,7 +94,7 @@ func (s *DesktopService) DismissDogeTokenSwitch(key string) error {
 	return nil
 }
 
-// SwitchDogeToken 保留旧绑定入口；实际切换已提升为所有来源共用的 Profile 切换。
+// SwitchDogeToken 根据二狗子令牌 ID 找到对应 Profile，并转交统一切换流程。
 func (s *DesktopService) SwitchDogeToken(key string, tokenID int64) error {
 	state := s.runtime.State()
 	if state == nil || tokenID <= 0 {
@@ -218,9 +218,9 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
-		if status.Configured {
+		if clientEntry.Mode == "relay" && len(clientEntry.OfficialBackups) > 0 {
 			var err error
-			configResult, err = clientconfig.ConfigureWithResult(effectiveConfig, category, candidate.ID)
+			configResult, err = clientconfig.ConfigureWithResult(effectiveConfig, category, candidate.ID, s.runtime.DataDirectory())
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
@@ -254,6 +254,9 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 			return errors.New("候选 Profile 的客户端配置字段已被并发修改，请重新切换")
 		}
 		cfg.ActiveProfiles[category] = candidate.ID
+		if clientConfigRendered {
+			rememberOfficialConfig(cfg, category, configResult)
+		}
 		return nil
 	}); err != nil {
 		if configResult.Rollback != nil {

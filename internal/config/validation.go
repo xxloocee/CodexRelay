@@ -258,7 +258,7 @@ func ValidatePreferences(preferences Preferences) error {
 	if strings.TrimSpace(preferences.DefaultSource) != preferences.DefaultSource {
 		return fmt.Errorf("主程序默认来源无效: %q", preferences.DefaultSource)
 	}
-	if preferences.DefaultSource != "" && preferences.DefaultSource != SourceDoge && preferences.DefaultSource != SourceCustom {
+	if preferences.DefaultSource != "" && preferences.DefaultSource != SourceDoge && preferences.DefaultSource != SourceCustom && preferences.DefaultSource != SourceOfficial {
 		return fmt.Errorf("主程序默认来源无效: %q", preferences.DefaultSource)
 	}
 	if preferences.DefaultCategory != "" {
@@ -393,6 +393,9 @@ func ValidateAPIKey(raw string) error {
 // 约定的一个固定文件名；目录可以由用户选择，但必须是绝对路径，且不得
 // 通过文件名字段跳出目录或覆盖其他文件。
 func ValidateClientConfig(category string, client ClientConfig) error {
+	if client.Mode != "" && client.Mode != "official" && client.Mode != "relay" {
+		return errors.New("客户端配置模式无效")
+	}
 	if !IsCategory(category) {
 		return fmt.Errorf("客户端类别无效: %q", category)
 	}

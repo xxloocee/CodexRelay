@@ -39,8 +39,9 @@ const (
 )
 
 const (
-	SourceDoge   = "doge"
-	SourceCustom = "custom"
+	SourceDoge     = "doge"
+	SourceCustom   = "custom"
+	SourceOfficial = "official"
 
 	ThemeFuturePink     = "future-pink"
 	ThemeEnergyOrange   = "energy-orange"
@@ -85,12 +86,27 @@ var Categories = []string{
 }
 
 // ClientConfig 保存外部 AI 客户端的配置目录和适配器固定的主配置文件名。
-// 目录由启动时按已知默认目录只读探测，用户也可以在高级设置中覆盖；文件名
-// 仅为兼容旧配置保留，写入前必须通过 ValidateClientConfig；不保存外部文件正文。
+// 目录由启动时按已知默认目录只读探测，用户也可以在高级设置中覆盖；不保存
+// 外部文件正文。
 type ClientConfig struct {
 	ConfigDir             string `json:"configDir,omitempty"`
 	ConfigFile            string `json:"configFile,omitempty"`
 	SkipConfigReplacement bool   `json:"skipConfigReplacement,omitempty"`
+	Mode                  string `json:"mode,omitempty"`
+	// OfficialBackups 保存 CodexRelay 接管前的客户端文件快照元数据。
+	// 正文保存在 Relay 数据目录的 client-backups 中，不进入主配置。
+	OfficialBackups []ClientConfigBackup `json:"officialBackups,omitempty"`
+}
+
+// ClientConfigBackup 描述一个可恢复的客户端官方配置文件。
+// ExpectedSHA256 是 CodexRelay 最近一次写入该文件的指纹，用于恢复前检测外部修改。
+type ClientConfigBackup struct {
+	Path           string `json:"path"`
+	BackupPath     string `json:"backupPath,omitempty"`
+	BackupSHA256   string `json:"backupSha256,omitempty"`
+	Existed        bool   `json:"existed"`
+	Mode           uint32 `json:"mode,omitempty"`
+	ExpectedSHA256 string `json:"expectedSha256,omitempty"`
 }
 
 // ClientConfigFileFor 返回每个客户端唯一允许接管的配置文件名。
@@ -428,6 +444,7 @@ func Clone(source AppConfig) AppConfig {
 	}
 	clone.ClientConfigs = make(map[string]ClientConfig, len(source.ClientConfigs))
 	for category, client := range source.ClientConfigs {
+		client.OfficialBackups = append([]ClientConfigBackup(nil), client.OfficialBackups...)
 		clone.ClientConfigs[category] = client
 	}
 	clone.Doge.Groups = append([]string(nil), source.Doge.Groups...)

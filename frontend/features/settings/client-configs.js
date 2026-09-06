@@ -7,6 +7,8 @@ export function createClientConfigs({ loadState }) {
   function renderClientConfigs() {
     const rows = $("clientConfigRows");
     if (!rows) return;
+    const backupNote = $("clientBackupDirectoryNote");
+    if (backupNote) backupNote.textContent = `外部客户端原配置备份存放在：${serverState.snapshot?.clientBackupDirectory || "当前 CodexRelay 数据目录/client-backups"}`;
     const focusedInput = document.activeElement?.dataset?.clientCategory || "";
     const focusedValue = focusedInput ? document.activeElement.value : "";
     rows.replaceChildren();

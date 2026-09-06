@@ -10,6 +10,7 @@ export function createProfileList({
   isDogeSyncing,
   isCategoryVisible,
   activateProfile,
+  activateOfficial,
   testProfile,
   openEditor,
   deleteProfile,
@@ -63,6 +64,64 @@ export function createProfileList({
     list.appendChild(row);
   }
 
+  function officialClientState(client) {
+    const active = Boolean(String(serverState.snapshot?.activeProfiles?.[client.category] || "").trim());
+    const status = client.status || "not_detected";
+    const backupAvailable = Boolean(client.officialBackupAvailable);
+    // A generic not_configured status can also mean a user's unrelated client
+    // setup. Only the backend's explicit official status represents current
+    // official mode, even when an older Relay snapshot is still retained.
+    const official = !active && status === "not_configured" && client.statusText === "使用官方配置";
+    // Without a saved Relay snapshot, the official action cannot restore the
+    // external file. Keep it visible for context but make the failed path
+    // explicit instead of allowing a click that is guaranteed to error.
+    const unavailable = !backupAvailable && !official;
+    return {
+      current: !active && official,
+      backupAvailable,
+      unavailable,
+    };
+  }
+
+  function renderOfficialRow(client, list) {
+    const row = document.createElement("article");
+    const category = client.category;
+    const officialState = officialClientState(client);
+    const active = officialState.current;
+    row.className = "profile-row official-profile-row" + (active ? " active" : "");
+    row.dataset.category = category;
+    const mark = document.createElement("span");
+    mark.className = "provider-mark official-provider-mark";
+    mark.textContent = "O";
+    const tags = [];
+    if (!navigation.sourceFilter) tags.push({ text: "官方", tone: "source" });
+    if (!navigation.categoryFilter) tags.push({ text: categoryLabel(category), tone: "category" });
+    const info = createProfileInfo({ name: `${client.label} 官方`, tags, note: "使用客户端原生官方配置", active });
+    const actions = document.createElement("div");
+    actions.className = "profile-actions";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = active ? "use-button current" : "use-button";
+    button.title = active
+      ? "当前使用官方配置"
+      : officialState.unavailable
+        ? "官方配置不可恢复：未记录可恢复的官方快照"
+        : "切换到官方配置";
+    button.setAttribute("aria-label", button.title);
+    button.appendChild(icon(active ? "check" : officialState.unavailable ? "x" : "play"));
+    const label = document.createElement("span");
+    label.textContent = active ? "当前" : officialState.unavailable ? "不可用" : "切换";
+    label.dataset.buttonLabel = "";
+    button.appendChild(label);
+    button.disabled = active || officialState.unavailable;
+    button.addEventListener("click", (event) => activateOfficial(category, event.currentTarget));
+    actions.appendChild(button);
+    const spacer = document.createElement("span");
+    spacer.setAttribute("aria-hidden", "true");
+    row.append(spacer, mark, info, actions);
+    list.appendChild(row);
+  }
+
   function renderProfiles() {
     if (runtimeState.draggingSortKey) return;
     if (navigation.categoryFilter && !isCategoryVisible(navigation.categoryFilter)) navigation.categoryFilter = "";
@@ -72,14 +131,21 @@ export function createProfileList({
     const dogeTokens = serverState.snapshot?.doge?.tokens || [];
     const dogeByProfileID = new Map(dogeTokens.filter((token) => token.profileId).map((token) => [token.profileId, token]));
     const profiles = allProfiles.filter((profile) => profileMatchesFilters(profile));
+    const officialClients = (serverState.snapshot?.clientConfigs || []).filter((client) => client.status !== "unsupported" && isCategoryVisible(client.category) &&
+      (!navigation.sourceFilter || navigation.sourceFilter === "official") &&
+      (!navigation.categoryFilter || client.category === navigation.categoryFilter));
     renderFilterButtons();
-    for (const profile of profiles) {
-      if (profile.source === "doge") {
-        // 二狗子 Profile 必须以最新目录实体为准；缺失项不得退回普通可切换行。
-        const token = dogeByProfileID.get(profile.id);
-        if (token) renderDogeToken(token, list, { sortable: true });
-      } else {
-        renderProfileRow(profile, list);
+    for (const category of categoryOptions) {
+      const official = officialClients.find((client) => client.category === category);
+      if (official) renderOfficialRow(official, list);
+      for (const profile of profiles.filter((item) => item.category === category)) {
+        if (profile.source === "doge") {
+          // 二狗子 Profile 必须以最新目录实体为准；缺失项不得退回普通可切换行。
+          const token = dogeByProfileID.get(profile.id);
+          if (token) renderDogeToken(token, list, { sortable: true });
+        } else {
+          renderProfileRow(profile, list);
+        }
       }
     }
     const dogeSelected = navigation.sourceFilter === "doge";
@@ -87,7 +153,7 @@ export function createProfileList({
     const dogeSyncing = dogeVisible && Boolean(serverState.snapshot.doge?.bound) && isDogeSyncing();
     const dogeSyncError = dogeVisible && Boolean(serverState.snapshot.doge?.bound) && Boolean(serverState.snapshot.doge?.lastSyncError);
     const dogeFailedBeforeData = dogeSyncError && !serverState.snapshot.doge?.lastSyncAt && !dogeSyncing;
-    const hasRows = profiles.length > 0;
+    const hasRows = profiles.length > 0 || officialClients.length > 0;
     $("emptyProfiles").classList.toggle("hidden", hasRows);
     $("emptyProfilesTitle").textContent = dogeSyncing ? "二狗子 API 同步中..." : (dogeFailedBeforeData ? "二狗子 API 同步失败，请重试" : (dogeSelected ? (serverState.snapshot.doge?.bound ? "二狗子暂无令牌" : "请在设置中绑定二狗子") : "还没有代理 API"));
     $("emptyAdd").classList.toggle("hidden", dogeSelected);
@@ -173,6 +239,9 @@ export function createProfileList({
 
   function renderFilterButtons() {
     const activeCategories = new Set((serverState.snapshot.profiles || []).filter((profile) => profile.active).map((profile) => profile.category));
+    for (const client of serverState.snapshot?.clientConfigs || []) {
+      if (officialClientState(client).current) activeCategories.add(client.category);
+    }
     document.querySelectorAll(".filter-options").forEach((group) => {
       const isCategoryGroup = group.dataset.filterGroup === "category";
       const value = isCategoryGroup ? navigation.categoryFilter : navigation.sourceFilter;
@@ -203,6 +272,7 @@ export function createProfileList({
   }
 
   function sourceLabel(source) {
+    if (source === "official") return "官方";
     return source === "doge" ? "二狗子" : "自定义";
   }
 

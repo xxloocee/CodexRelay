@@ -13,9 +13,11 @@ package desktop
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 
 	"codexrelay/internal/config"
+	"codexrelay/internal/desktop/clientconfig"
 	"codexrelay/internal/relay"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -57,6 +59,8 @@ func setupTray(
 					activeName = trayDogeTokenLabel(active.Profile.Name, token)
 				}
 			}
+		} else if clientconfig.Supports(config.CategoryCodex) && trayOfficialCurrent(state.Config, config.CategoryCodex) {
+			activeName = categoryLabel(config.CategoryCodex) + " 官方"
 		}
 		for _, category := range config.Categories {
 			if !visibleCategories[category] {
@@ -72,7 +76,12 @@ func setupTray(
 				item := categoryMenu.AddRadio(entry.name, entry.current)
 				item.OnClick(func(_ *application.Context) {
 					// 托盘只更新已经接管的客户端；未接管时仅切换本地 Profile。
-					err := service.activateProfileFromTray(entry.profileID)
+					var err error
+					if strings.HasPrefix(entry.profileID, "official:") {
+						err = service.ActivateProfile(entry.profileID)
+					} else {
+						err = service.activateProfileFromTray(entry.profileID)
+					}
 					if err != nil {
 						wailsApp.Logger.Error("托盘切换代理 API 失败", "error", err)
 					}
@@ -132,7 +141,21 @@ func trayEntriesForCategory(cfg config.AppConfig, category string) []trayMenuEnt
 			profilesByID[profile.ID] = profile
 		}
 	}
-	entries := make([]trayMenuEntry, 0, len(profilesByID))
+	entries := make([]trayMenuEntry, 0, len(profilesByID)+1)
+	if clientconfig.Supports(category) {
+		client := cfg.ClientConfigs[category]
+		officialCurrent := trayOfficialCurrent(cfg, category)
+		// The official entry is actionable only when the client is already in
+		// official mode or Relay has a captured snapshot to restore. Showing it
+		// for an unrelated/unconfigured client leads to a guaranteed restore
+		// failure because activateOfficial has no source files to recover.
+		if officialCurrent || len(client.OfficialBackups) > 0 {
+			entries = append(entries, trayMenuEntry{
+				category: category, profileID: "official:" + category, name: categoryLabel(category) + " 官方",
+				current: officialCurrent,
+			})
+		}
+	}
 	order := config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)[category]
 	for _, profileID := range order {
 		profile, ok := profilesByID[profileID]
@@ -152,6 +175,26 @@ func trayEntriesForCategory(cfg config.AppConfig, category string) []trayMenuEnt
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+func trayOfficialCurrent(cfg config.AppConfig, category string) bool {
+	if strings.TrimSpace(cfg.ActiveProfiles[category]) != "" {
+		return false
+	}
+	// A consumed official snapshot is represented by Mode=official with no
+	// remaining backup metadata. If stale metadata remains, keep the tray item
+	// actionable rather than marking it as the current official state.
+	if len(cfg.ClientConfigs[category].OfficialBackups) > 0 {
+		return false
+	}
+	status, err := clientconfig.Inspect(cfg, category)
+	if err != nil {
+		return false
+	}
+	// Only an explicitly recorded official status is current. A generic
+	// not_configured result may simply be an unrelated or unavailable client
+	// configuration and must not be treated as an official restore state.
+	return status.Status == "not_configured" && status.StatusText == "使用官方配置"
 }
 
 func trayVisibleCategorySet(categories []string) map[string]bool {

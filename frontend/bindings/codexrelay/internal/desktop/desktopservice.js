@@ -22,7 +22,7 @@ import * as $models from "./models.js";
 
 /**
  * ActivateProfile 启用指定 Profile。第二个参数用于明确控制是否同步外部
- * 客户端配置：桌面端确认配置时传 true，用户跳过或兼容旧调用时传 false。
+ * 客户端配置：桌面端确认配置时传 true，用户跳过时传 false。
  * 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
  * @param {string} id
  * @param {boolean[]} configure
@@ -442,7 +442,7 @@ export function SetTokenSwitchSettings(input) {
 }
 
 /**
- * SwitchDogeToken 保留旧绑定入口；实际切换已提升为所有来源共用的 Profile 切换。
+ * SwitchDogeToken 根据二狗子令牌 ID 找到对应 Profile，并转交统一切换流程。
  * @param {string} key
  * @param {number} tokenID
  * @returns {$CancellablePromise<void>}

@@ -94,6 +94,7 @@ const profileActivationFeature = createProfileActivation({
 });
 const {
   beginActivation,
+  activateOfficial,
   closeClientSetupModal,
   mount: mountProfileActivation,
 } = profileActivationFeature;
@@ -123,6 +124,7 @@ profileListFeature = createProfileList({
   isDogeSyncing: (...args) => dogeAccountFeature.isDogeSyncing(...args),
   isCategoryVisible,
   activateProfile,
+  activateOfficial,
   testProfile,
   openEditor,
   deleteProfile,

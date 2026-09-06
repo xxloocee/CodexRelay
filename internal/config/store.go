@@ -123,31 +123,27 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 		cfg.ClientAccessHost = "127.0.0.1"
 		clientConfigMigrated = true
 	}
-	// 旧版本可能保存了 IPv6 或与当前监听范围不匹配的访问主机；
-	// 监听器只绑定 IPv4，因此迁移为本机回环地址，避免启动后写出不可达 URL。
 	if ValidateClientAccessHost(cfg.ClientAccessHost) != nil ||
 		(!cfg.ListenOnAllInterfaces && !IsLoopbackClientAccessHost(cfg.ClientAccessHost)) {
 		cfg.ClientAccessHost = "127.0.0.1"
 		clientConfigMigrated = true
 	}
-	// 兼容旧版本可能保存的目录尾部斜杠或首尾空白；规范化后再校验，
-	// 仍由 ValidateClientConfig 拒绝控制字符、相对路径和非法文件名。
+	// Normalize configured client targets before validation. The adapter owns the
+	// filename, while the user-configurable portion is the absolute directory.
 	for category, client := range cfg.ClientConfigs {
-		previous := client
+		beforeDirectory, beforeFile := client.ConfigDir, client.ConfigFile
 		client.ConfigDir = strings.TrimSpace(client.ConfigDir)
 		if client.ConfigDir != "" {
 			client.ConfigDir = filepath.Clean(client.ConfigDir)
 		}
 		client.ConfigFile = strings.TrimSpace(client.ConfigFile)
-		// 旧版本允许在 JSON 中保留任意文件名；新版本只允许选择目录，
-		// 文件名由适配器固定。加载时迁移到固定值，避免升级后无法启动。
 		if expected, supported := ClientConfigFileFor(category); supported {
 			client.ConfigFile = expected
 		} else if IsCategory(category) {
 			client.ConfigFile = ""
 		}
 		cfg.ClientConfigs[category] = client
-		if client != previous {
+		if client.ConfigDir != beforeDirectory || client.ConfigFile != beforeFile {
 			clientConfigMigrated = true
 		}
 	}

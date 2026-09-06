@@ -50,6 +50,13 @@ export class PublicClientConfig {
              */
             this["skipConfigReplacement"] = false;
         }
+        if (!("officialBackupAvailable" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["officialBackupAvailable"] = false;
+        }
         if (!("status" in $$source)) {
             /**
              * @member

@@ -252,6 +252,7 @@ h1, h2, p { margin-top: 0; }
   font-weight: 700;
 }
 .provider-mark.provider-image { padding: 5px; object-fit: contain; }
+.official-provider-mark { background: #eef7ff; color: #2674b8; }
 .profile-row.unavailable { opacity: .52; background: #f5f6f7; }
 .profile-row.unavailable:hover { border-color: var(--line); box-shadow: none; }
 .profile-row.unavailable .profile-actions { opacity: 1; pointer-events: auto; }

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unicode"
@@ -32,6 +33,7 @@ import (
 type ConfigFileResult struct {
 	Path           string `json:"path"`
 	BackupPath     string `json:"backupPath,omitempty"`
+	BackupSHA256   string `json:"backupSha256,omitempty"`
 	Existed        bool   `json:"existed"`
 	Created        bool   `json:"created"`
 	Mode           uint32 `json:"mode,omitempty"`
@@ -40,10 +42,11 @@ type ConfigFileResult struct {
 
 // ConfigureResult contains the files changed by ConfigureWithResult. Rollback
 // restores the exact bytes and permissions captured before the write.
-// Configure keeps the historical error-only API and discards this value.
 type ConfigureResult struct {
-	Files    []ConfigFileResult `json:"files"`
-	Rollback func() error       `json:"-"`
+	Files                 []ConfigFileResult `json:"files"`
+	Rollback              func() error       `json:"-"`
+	OfficialSnapshot      bool               `json:"-"`
+	ResetOfficialSnapshot bool               `json:"-"`
 }
 
 type configFileSnapshot struct {
@@ -56,20 +59,27 @@ type configFileSnapshot struct {
 // applyConfigChanges backs up every existing input, then atomically commits
 // all files. A failed write restores all files already written and removes
 // files created by this transaction.
-func applyConfigChanges(changes []ConfigFileChange) (ConfigureResult, error) {
+func applyConfigChanges(changes []ConfigFileChange, backupDirectory ...string) (ConfigureResult, error) {
 	paths := make([]string, 0, len(changes))
 	for _, change := range changes {
 		paths = append(paths, change.Path)
 	}
 	return applyConfigTransaction(paths, func(map[string]configFileSnapshot) ([]ConfigFileChange, error) {
 		return changes, nil
-	})
+	}, backupDirectory...)
 }
 
 // applyConfigTransaction reads each source exactly once, renders from that
 // immutable snapshot, verifies the source did not change, then commits. A
 // rollback refuses to overwrite a file that another process changed later.
-func applyConfigTransaction(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error)) (ConfigureResult, error) {
+func applyConfigTransaction(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), backupDirectory ...string) (ConfigureResult, error) {
+	return applyConfigTransactionWithBackupPolicy(paths, render, nil, backupDirectory...)
+}
+
+// applyConfigTransactionWithBackupPolicy allows callers that already have an
+// official snapshot to skip creating another unreferenced copy. A nil policy
+// backs up every existing source file.
+func applyConfigTransactionWithBackupPolicy(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
 	result := ConfigureResult{}
 	snapshots := make([]configFileSnapshot, 0, len(paths))
 	byPath := make(map[string]configFileSnapshot, len(paths))
@@ -122,18 +132,34 @@ func applyConfigTransaction(paths []string, render func(map[string]configFileSna
 	// Back up before changing any file. This also means a parse/generation
 	// failure cannot leave behind a misleading backup.
 	result.Files = make([]ConfigFileResult, 0, len(uniqueChanges))
+	createdBackups := make([]string, 0, len(uniqueChanges))
+	cleanupBackups := func() error {
+		var cleanupErr error
+		for _, path := range createdBackups {
+			if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				cleanupErr = errors.Join(cleanupErr, removeErr)
+			}
+		}
+		return cleanupErr
+	}
 	for _, change := range uniqueChanges {
 		snapshot := byPath[change.Path]
 		backup := ""
-		if snapshot.existed {
-			backup, err = backupClientData(snapshot.path, snapshot.data)
+		if snapshot.existed && (shouldBackup == nil || shouldBackup(snapshot.path)) {
+			backup, err = backupClientData(snapshot.path, snapshot.data, backupDirectory...)
 			if err != nil {
+				_ = cleanupBackups()
 				return result, err
 			}
+			createdBackups = append(createdBackups, backup)
+		}
+		backupSHA256 := ""
+		if snapshot.existed {
+			backupSHA256 = sha256Hex(snapshot.data)
 		}
 		result.Files = append(result.Files, ConfigFileResult{
 			Path: snapshot.path, BackupPath: backup, Existed: snapshot.existed, Created: !snapshot.existed,
-			Mode: uint32(snapshot.mode.Perm()), ExpectedSHA256: sha256Hex(change.Data),
+			Mode: uint32(snapshot.mode.Perm()), ExpectedSHA256: sha256Hex(change.Data), BackupSHA256: backupSHA256,
 		})
 	}
 
@@ -171,6 +197,14 @@ func applyConfigTransaction(paths []string, render func(map[string]configFileSna
 				rollbackErr = fmt.Errorf("恢复 %s: %w", filepath.Base(snapshot.path), err)
 			}
 		}
+		// If a concurrent writer changed a committed file, keep the newly
+		// captured backups. They may be the only safe recovery copy once this
+		// transaction declines to overwrite that external change.
+		if rollbackErr == nil {
+			if err := cleanupBackups(); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+		}
 		return rollbackErr
 	}
 	result.Rollback = rollback
@@ -191,7 +225,34 @@ func applyConfigTransaction(paths []string, render func(map[string]configFileSna
 		}
 		written[change.Path] = writtenConfigFile{data: append([]byte(nil), change.Data...), mode: snapshot.mode}
 	}
+	// Verify the complete batch after the last write. Without this pass an
+	// external client can rewrite an earlier file while a later file is being
+	// committed, leaving a partially managed configuration reported as success.
+	for _, change := range uniqueChanges {
+		expected := written[change.Path]
+		if err := ensureWrittenConfigUnchanged(change.Path, expected.data, expected.mode); err != nil {
+			if rollbackErr := rollback(); rollbackErr != nil {
+				return result, &ConfigureTransactionError{Err: err, Result: result, RollbackErr: rollbackErr}
+			}
+			return result, &ConfigureTransactionError{Err: err, Result: result}
+		}
+	}
 	return result, nil
+}
+
+func ensureWrittenConfigUnchanged(path string, expected []byte, mode os.FileMode) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("提交后检查 %s: %w", filepath.Base(path), err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("提交后检查 %s: %w", filepath.Base(path), err)
+	}
+	if !bytes.Equal(data, expected) || !clientFileModesEqual(info.Mode(), mode) {
+		return fmt.Errorf("%s 在配置提交后被其他进程修改", filepath.Base(path))
+	}
+	return nil
 }
 
 func ensureSnapshotUnchanged(snapshot configFileSnapshot) error {
@@ -206,10 +267,20 @@ func ensureSnapshotUnchanged(snapshot configFileSnapshot) error {
 	if err != nil {
 		return fmt.Errorf("提交前检查 %s: %w", filepath.Base(snapshot.path), err)
 	}
-	if !snapshot.existed || !bytes.Equal(data, snapshot.data) || info.Mode().Perm() != snapshot.mode.Perm() {
+	if !snapshot.existed || !bytes.Equal(data, snapshot.data) || !clientFileModesEqual(info.Mode(), snapshot.mode) {
 		return fmt.Errorf("%s 在配置期间被其他进程修改", filepath.Base(snapshot.path))
 	}
 	return nil
+}
+
+// Windows does not preserve Unix permission bits through MoveFileEx and may
+// report a different Perm value after an atomic replacement. Contents remain
+// the reliable concurrency marker there; Unix keeps the stricter mode check.
+func clientFileModesEqual(actual, expected os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return actual.Perm() == expected.Perm()
 }
 
 // ConfigFileChange is one generated external configuration file.
@@ -281,7 +352,7 @@ func verifyConfigFileResult(file ConfigFileResult) error {
 		return fmt.Errorf("恢复 %s 失败: 文件已被其他进程修改", filepath.Base(file.Path))
 	}
 	mode := os.FileMode(file.Mode)
-	if mode != 0 && info.Mode().Perm() != mode.Perm() {
+	if mode != 0 && !clientFileModesEqual(info.Mode(), mode) {
 		return fmt.Errorf("恢复 %s 失败: 文件权限已被其他进程修改", filepath.Base(file.Path))
 	}
 	return nil
@@ -302,6 +373,193 @@ func RestoreConfigFiles(files []ConfigFileResult) error {
 		}
 	}
 	return firstErr
+}
+
+// RestoreOfficialConfig restores the exact files captured before CodexRelay
+// first took over a client. The caller must clear the persisted snapshot only
+// after this function succeeds.
+func RestoreOfficialConfig(files []config.ClientConfigBackup) error {
+	_, err := RestoreOfficialConfigWithRollback(files)
+	return err
+}
+
+func RestoreOfficialConfigWithRollback(files []config.ClientConfigBackup) (func() error, error) {
+	if len(files) == 0 {
+		return nil, errors.New("没有可恢复的官方客户端配置")
+	}
+	converted := make([]ConfigFileResult, 0, len(files))
+	for _, file := range files {
+		converted = append(converted, ConfigFileResult{
+			Path: file.Path, BackupPath: file.BackupPath, Existed: file.Existed,
+			Mode: file.Mode, ExpectedSHA256: file.ExpectedSHA256, BackupSHA256: file.BackupSHA256,
+		})
+	}
+	return restoreConfigFilesTransaction(converted)
+}
+
+type restoreTarget struct {
+	file           ConfigFileResult
+	desired        []byte
+	current        []byte
+	currentMode    os.FileMode
+	currentExisted bool
+}
+
+// restoreConfigFilesTransaction verifies every target before changing any
+// file, then restores the complete batch. A failed write restores the files
+// already changed from their in-memory snapshots.
+func restoreConfigFilesTransaction(files []ConfigFileResult) (func() error, error) {
+	targets := make([]restoreTarget, 0, len(files))
+	for _, file := range files {
+		if err := verifyConfigFileResult(file); err != nil {
+			return nil, err
+		}
+		target := restoreTarget{file: file}
+		if file.Existed {
+			data, err := os.ReadFile(file.BackupPath)
+			if err != nil {
+				return nil, fmt.Errorf("读取 %s 官方备份失败: %w", filepath.Base(file.Path), err)
+			}
+			if file.BackupSHA256 == "" || sha256Hex(data) != file.BackupSHA256 {
+				return nil, fmt.Errorf("%s 官方备份校验失败", filepath.Base(file.Path))
+			}
+			target.desired = data
+		}
+		data, err := os.ReadFile(file.Path)
+		if errors.Is(err, os.ErrNotExist) {
+			data = nil
+		} else if err != nil {
+			return nil, fmt.Errorf("读取 %s 当前内容失败: %w", filepath.Base(file.Path), err)
+		} else {
+			target.current = data
+			target.currentExisted = true
+			if info, statErr := os.Stat(file.Path); statErr == nil {
+				target.currentMode = info.Mode().Perm()
+			} else {
+				return nil, fmt.Errorf("读取 %s 当前权限失败: %w", filepath.Base(file.Path), statErr)
+			}
+		}
+		targets = append(targets, target)
+	}
+	applied := make([]restoreTarget, 0, len(targets))
+	rollback := func() error {
+		var result error
+		for index := len(applied) - 1; index >= 0; index-- {
+			result = errors.Join(result, restoreCurrentConfigFile(applied[index]))
+		}
+		return result
+	}
+	for _, target := range targets {
+		if err := ensureRestoreTargetUnchanged(target); err != nil {
+			return nil, errors.Join(fmt.Errorf("恢复 %s 失败: %w", filepath.Base(target.file.Path), err), rollback())
+		}
+		var err error
+		if target.file.Existed {
+			mode := os.FileMode(target.file.Mode)
+			if mode == 0 {
+				mode = 0o600
+			}
+			err = writeClientFileRollback(target.file.Path, target.desired, mode)
+		} else {
+			err = os.Remove(target.file.Path)
+			if errors.Is(err, os.ErrNotExist) {
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("恢复 %s 失败: %w", filepath.Base(target.file.Path), err), rollback())
+		}
+		applied = append(applied, target)
+	}
+	// Verify the complete restore after the last write. A client may rewrite a
+	// file while another restore target is being committed; never report
+	// success or consume the official snapshot in that case.
+	for _, target := range applied {
+		if err := ensureRestoredConfigUnchanged(target); err != nil {
+			return nil, errors.Join(fmt.Errorf("恢复 %s 失败: %w", filepath.Base(target.file.Path), err), rollback())
+		}
+	}
+	return rollback, nil
+}
+
+func ensureRestoredConfigUnchanged(target restoreTarget) error {
+	data, err := os.ReadFile(target.file.Path)
+	info, statErr := os.Stat(target.file.Path)
+	if !target.file.Existed {
+		if errors.Is(err, os.ErrNotExist) && errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		}
+		return errors.New("当前文件已被其他进程修改")
+	}
+	if err != nil || statErr != nil || !bytes.Equal(data, target.desired) {
+		return errors.New("当前文件已被其他进程修改")
+	}
+	mode := os.FileMode(target.file.Mode)
+	if mode != 0 && info.Mode().Perm() != mode.Perm() {
+		return errors.New("当前文件权限已被其他进程修改")
+	}
+	return nil
+}
+
+func ensureRestoreTargetUnchanged(target restoreTarget) error {
+	data, err := os.ReadFile(target.file.Path)
+	info, statErr := os.Stat(target.file.Path)
+	if !target.currentExisted {
+		if errors.Is(err, os.ErrNotExist) && errors.Is(statErr, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		}
+		return errors.New("当前文件已被其他进程修改")
+	}
+	if err != nil || statErr != nil || !bytes.Equal(data, target.current) || !clientFileModesEqual(info.Mode(), target.currentMode) {
+		return errors.New("当前文件已被其他进程修改")
+	}
+	return nil
+}
+
+func restoreCurrentConfigFile(target restoreTarget) error {
+	if !target.file.Existed {
+		if _, err := os.Stat(target.file.Path); !errors.Is(err, os.ErrNotExist) {
+			if err != nil {
+				return err
+			}
+			return errors.New("当前文件已被其他进程修改")
+		}
+		if !target.currentExisted {
+			return nil
+		}
+		return writeClientFileRollback(target.file.Path, target.current, target.currentMode)
+	}
+	current, err := os.ReadFile(target.file.Path)
+	info, statErr := os.Stat(target.file.Path)
+	if !target.currentExisted {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New("当前文件已被其他进程修改")
+	}
+	desiredMode := os.FileMode(target.file.Mode)
+	if desiredMode == 0 {
+		desiredMode = 0o600
+	}
+	if err != nil || statErr != nil || !bytes.Equal(current, target.desired) || info.Mode().Perm() != desiredMode.Perm() {
+		return errors.New("当前文件已被其他进程修改")
+	}
+	return writeClientFileRollback(target.file.Path, target.current, target.currentMode)
 }
 
 func (e *ConfigureTransactionError) Error() string {
@@ -326,28 +584,36 @@ func activeProfileForClient(cfg config.AppConfig, category, profileID string) *c
 	return &profile
 }
 
-// backupClientFile 为外部文件创建带时间戳的 .CodexRelay 备份，不存在的文件不生成空备份。
-func backupClientFile(path string) error {
-	_, err := backupClientFilePath(path)
-	return err
+// ClientBackupDirectory returns the private Relay-owned directory for one
+// client's original configuration snapshots.
+func ClientBackupDirectory(dataDirectory, category string) string {
+	return filepath.Join(filepath.Clean(dataDirectory), "client-backups", category)
 }
 
-func backupClientFilePath(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("读取备份源文件: %w", err)
-	}
-	return backupClientData(path, data)
-}
-
-func backupClientData(path string, data []byte) (string, error) {
+func backupClientData(path string, data []byte, backupDirectory ...string) (string, error) {
 	stamp := time.Now().Format("20060102-150405")
-	backup := fmt.Sprintf("%s.%s.CodexRelay", path, stamp)
+	if len(backupDirectory) == 0 || strings.TrimSpace(backupDirectory[0]) == "" {
+		// Preserve the historical helper API: callers that do not provide Relay's
+		// data directory keep backups beside the source file.
+		backup := fmt.Sprintf("%s.%s.CodexRelay", path, stamp)
+		for index := 2; pathExists(backup); index++ {
+			backup = fmt.Sprintf("%s.%s-%d.CodexRelay", path, stamp, index)
+		}
+		if err := storage.WriteBytesAtomic(backup, ".codexrelay-backup-*.tmp", data, 0o600); err != nil {
+			return "", fmt.Errorf("创建 %s 备份: %w", filepath.Base(path), err)
+		}
+		return backup, nil
+	}
+	destination := filepath.Clean(backupDirectory[0])
+	if !filepath.IsAbs(destination) {
+		return "", errors.New("客户端备份目录必须是绝对路径")
+	}
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		return "", fmt.Errorf("创建客户端备份目录: %w", err)
+	}
+	backup := filepath.Join(destination, fmt.Sprintf("%s.%s.CodexRelay", filepath.Base(path), stamp))
 	for index := 2; pathExists(backup); index++ {
-		backup = fmt.Sprintf("%s.%s-%d.CodexRelay", path, stamp, index)
+		backup = filepath.Join(destination, fmt.Sprintf("%s.%s-%d.CodexRelay", filepath.Base(path), stamp, index))
 	}
 	if err := storage.WriteBytesAtomic(backup, ".codexrelay-backup-*.tmp", data, 0o600); err != nil {
 		return "", fmt.Errorf("创建 %s 备份: %w", filepath.Base(path), err)

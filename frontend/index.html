@@ -68,7 +68,7 @@
       <main class="page-content list-page">
         <div class="profile-toolbar">
           <div class="profile-filters" aria-label="代理 API 筛选">
-            <div class="filter-row"><span class="filter-label">来源</span><div class="filter-options" data-filter-group="source" role="tablist" aria-label="来源筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="doge">二狗子</button><button class="filter-option" type="button" data-filter-value="custom">自定义</button></div></div>
+            <div class="filter-row"><span class="filter-label">来源</span><div class="filter-options" data-filter-group="source" role="tablist" aria-label="来源筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="official">官方</button><button class="filter-option" type="button" data-filter-value="doge">二狗子</button><button class="filter-option" type="button" data-filter-value="custom">自定义</button></div></div>
             <div class="filter-row"><span class="filter-label">类别</span><div class="filter-options" data-filter-group="category" role="tablist" aria-label="类别筛选"><button class="filter-option active" type="button" data-filter-value="">全部</button><button class="filter-option" type="button" data-filter-value="codex">Codex</button><button class="filter-option" type="button" data-filter-value="claude">Claude</button><button class="filter-option" type="button" data-filter-value="gemini">Gemini</button><button class="filter-option" type="button" data-filter-value="grok">Grok</button><button class="filter-option" type="button" data-filter-value="opencode">OpenCode</button><button class="filter-option" type="button" data-filter-value="openclaw">OpenClaw</button><button class="filter-option" type="button" data-filter-value="hermes">Hermes</button><button class="filter-option" type="button" data-filter-value="image">生图</button><button class="filter-option" type="button" data-filter-value="other">其他</button></div></div>
           </div>
           <div class="homepage-statuses">
@@ -226,7 +226,7 @@
               <div class="homepage-default-view">
                 <span class="homepage-default-copy"><strong>默认视图</strong><small>设置主程序启动和恢复窗口时使用的主页筛选条件</small></span>
                 <div class="preference-selects">
-                  <label class="field"><span>主程序默认来源</span><select id="defaultSource"><option value="">全部</option><option value="doge">二狗子</option><option value="custom">自定义</option></select></label>
+                  <label class="field"><span>主程序默认来源</span><select id="defaultSource"><option value="">全部</option><option value="official">官方</option><option value="doge">二狗子</option><option value="custom">自定义</option></select></label>
                   <label class="field"><span>主程序默认类别</span><select id="defaultCategory"><option value="">全部类别</option><option value="codex">Codex</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="opencode">OpenCode</option><option value="openclaw">OpenClaw</option><option value="hermes">Hermes</option><option value="image">生图</option><option value="other">其他</option></select></label>
                   <label class="field"><span>恢复窗口时显示</span><select id="restoreViewMode"><option value="current">当前视图</option><option value="default">默认视图</option></select></label>
                 </div>
@@ -325,9 +325,10 @@
         <div id="advancedPanel" class="settings-panel hidden">
           <div class="panel-heading"><div><span class="panel-kicker">路径与外部客户端</span><h2>高级配置</h2><p class="panel-description">CodexRelay 配置和统计使用独立数据目录；外部客户端仅保存读取路径，不会迁移外部软件文件。</p></div></div>
           <div class="relay-data-directory-row">
-            <div class="relay-data-directory-copy"><strong>CodexRelay 配置文件路径</strong><small>切换后会迁移 config.json 和 usage.json，后续启动继续使用新路径。</small></div>
+            <div class="relay-data-directory-copy"><strong>CodexRelay 配置文件路径</strong><small>切换后会迁移 config.json、usage.json 和官方客户端备份，后续启动继续使用新路径。</small></div>
             <div class="relay-data-directory-control"><input id="dataDirectory" type="text" readonly aria-label="CodexRelay 配置文件路径"><button id="chooseDataDirectory" class="secondary-button compact-button" type="button"><span class="icon icon-edit" aria-hidden="true"></span><span data-button-label>选择路径</span></button></div>
           </div>
+          <p id="clientBackupDirectoryNote" class="footer-note">外部客户端原配置备份存放在 CodexRelay 数据目录的 client-backups 文件夹中。</p>
           <div id="clientConfigRows" class="client-config-rows"></div>
         </div>
         <div id="activityPanel" class="settings-panel hidden">

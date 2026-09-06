@@ -27,6 +27,8 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     const input = $("dataDirectory");
     if (!input) return;
     input.value = serverState.snapshot?.dataDirectory || "";
+    const backupNote = $("clientBackupDirectoryNote");
+    if (backupNote) backupNote.textContent = `外部客户端原配置备份存放在：${serverState.snapshot?.dataDirectory ? `${serverState.snapshot.dataDirectory}/client-backups` : "当前 CodexRelay 数据目录/client-backups"}`;
   }
 
   function openClientSetupModal(category, pending) {
@@ -87,6 +89,19 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     openClientSetupModal(pending.category, pending);
   }
 
+  async function activateOfficial(category, button = null) {
+    setButtonLoading(button, true, "切换中...");
+    try {
+      await ActivateProfile(`official:${category}`);
+      await loadState();
+      toast(`${clientCategoryLabel(category)} 已切换到官方配置`);
+    } catch (error) {
+      toast(errorMessage(error), true);
+    } finally {
+      setButtonLoading(button, false);
+    }
+  }
+
   async function resolveClientSetup(configure) {
     const pending = runtimeState.pendingActivation;
     const category = runtimeState.clientSetupCategory;
@@ -130,6 +145,7 @@ export function createProfileActivation({ loadState, categoryLabel }) {
   return {
     renderDataDirectory,
     beginActivation,
+    activateOfficial,
     closeClientSetupModal,
     mount,
   };

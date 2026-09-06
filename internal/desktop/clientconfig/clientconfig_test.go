@@ -118,7 +118,7 @@ func TestInspectCodexConfigurationReadsConfigAndAuthSeparately(t *testing.T) {
 	cfg := config.Default(8765)
 	cfg.LocalAccessToken = "sk-test-placeholder"
 	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: directory, ConfigFile: "config.toml"}
-	if err := configureCodex(configPath, filepath.Join(directory, "auth.json"), clientProxyURL(cfg.ProxyPort, config.CategoryCodex), cfg.LocalAccessToken, ""); err != nil {
+	if err := configureCodex(configPath, filepath.Join(directory, "auth.json"), clientProxyURL(cfg, config.CategoryCodex), cfg.LocalAccessToken, ""); err != nil {
 		t.Fatal(err)
 	}
 	status := inspectClientConfig(cfg, clientDefinition{Category: config.CategoryCodex, Label: "Codex", File: "config.toml", Kind: "codex"})

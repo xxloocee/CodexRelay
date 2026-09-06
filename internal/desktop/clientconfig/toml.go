@@ -47,7 +47,7 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 		}
 	}
 	if start < 0 {
-		block := []string{"", header, "name = \"CodexRelay\"", "base_url = " + strconv.Quote(endpoint), "wire_api = \"responses\"", "requires_openai_auth = true"}
+		block := []string{"", header, "name = \"ergouzi.life\"", "base_url = " + strconv.Quote(endpoint), "wire_api = \"responses\"", "requires_openai_auth = true"}
 		lines = append(lines, block...)
 	} else {
 		end := len(lines)
@@ -58,7 +58,7 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 			}
 		}
 		section := lines[start+1 : end]
-		section = upsertTomlLine(section, "name", "\"CodexRelay\"")
+		section = upsertTomlLine(section, "name", "\"ergouzi.life\"")
 		section = upsertTomlLine(section, "base_url", strconv.Quote(endpoint))
 		section = upsertTomlLine(section, "wire_api", "\"responses\"")
 		section = upsertTomlLine(section, "requires_openai_auth", "true")

@@ -68,13 +68,17 @@ func configureGemini(directory, file, endpoint, key string, models []config.Mode
 	return err
 }
 
-func configureGeminiResult(directory, file, endpoint, key string, models []config.ModelEntry, defaultModel string) (ConfigureResult, error) {
+func configureGeminiResult(directory, file, endpoint, key string, models []config.ModelEntry, defaultModel string, backupDirectory ...string) (ConfigureResult, error) {
+	return configureGeminiResultWithBackupPolicy(directory, file, endpoint, key, models, defaultModel, nil, backupDirectory...)
+}
+
+func configureGeminiResultWithBackupPolicy(directory, file, endpoint, key string, models []config.ModelEntry, defaultModel string, shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
 	envPath := file
 	if directory != "" {
 		envPath = filepath.Join(directory, ".env")
 	}
 	settingsPath := filepath.Join(directory, "settings.json")
-	return applyConfigTransaction([]string{envPath, settingsPath}, func(snapshots map[string]configFileSnapshot) ([]ConfigFileChange, error) {
+	return applyConfigTransactionWithBackupPolicy([]string{envPath, settingsPath}, func(snapshots map[string]configFileSnapshot) ([]ConfigFileChange, error) {
 		envData, err := renderDotEnvData(snapshots[envPath].data, endpoint, key, "GOOGLE_GEMINI_BASE_URL", "GEMINI_API_KEY", models, defaultModel)
 		if err != nil {
 			return nil, err
@@ -88,5 +92,5 @@ func configureGeminiResult(directory, file, endpoint, key string, models []confi
 			changes = append(changes, ConfigFileChange{Path: settingsPath, Data: settingsData})
 		}
 		return changes, nil
-	})
+	}, shouldBackup, backupDirectory...)
 }

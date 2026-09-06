@@ -484,7 +484,7 @@ func TestSwitchDogeTokenUpdatesCodexClientConfiguration(t *testing.T) {
 	if err := store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := clientconfig.Configure(cfg, config.CategoryCodex, "doge-profile"); err != nil {
+	if _, err := clientconfig.ConfigureWithResult(cfg, config.CategoryCodex, "doge-profile", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	runtime := newTestRuntime(t, directory, store, cfg)

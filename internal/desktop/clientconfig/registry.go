@@ -4,7 +4,7 @@
  * @Email         : Ricky@LiHai.La
  * @Project       : CodexRelay
  * @Description   : 外部 AI 客户端路径探测、接管状态检查与受控写入
- * @File          : 外部客户端配置适配器兼容实现
+ * @File          : 外部客户端配置适配器实现
  * @Read me       : 感谢使用 CodexRelay，源码注释齐全，支持二次开发。
  * @Remind        : 二次开发请保留原版权信息，谢谢。
  */
@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -34,18 +35,19 @@ const (
 
 // PublicClientConfig 是高级设置和启用前检查使用的脱敏状态，不返回外部配置正文。
 type PublicClientConfig struct {
-	Category              string `json:"category"`
-	Label                 string `json:"label"`
-	ConfigDir             string `json:"configDir"`
-	ConfigFile            string `json:"configFile"`
-	SkipConfigReplacement bool   `json:"skipConfigReplacement"`
-	Status                string `json:"status"`
-	Detected              bool   `json:"detected"`
-	Configured            bool   `json:"configured"`
-	RequiresProfile       bool   `json:"requiresProfile"`
-	StatusText            string `json:"statusText"`
-	LastChecked           string `json:"lastChecked"`
-	Error                 string `json:"error,omitempty"`
+	Category                string `json:"category"`
+	Label                   string `json:"label"`
+	ConfigDir               string `json:"configDir"`
+	ConfigFile              string `json:"configFile"`
+	SkipConfigReplacement   bool   `json:"skipConfigReplacement"`
+	OfficialBackupAvailable bool   `json:"officialBackupAvailable"`
+	Status                  string `json:"status"`
+	Detected                bool   `json:"detected"`
+	Configured              bool   `json:"configured"`
+	RequiresProfile         bool   `json:"requiresProfile"`
+	StatusText              string `json:"statusText"`
+	LastChecked             string `json:"lastChecked"`
+	Error                   string `json:"error,omitempty"`
 }
 
 type clientDefinition struct {
@@ -94,13 +96,9 @@ func clientConfigPath(definition clientDefinition, entry config.ClientConfig) (s
 	if directory == "" {
 		directory = definition.Default()
 	}
-	filename := strings.TrimSpace(entry.ConfigFile)
-	// The adapter owns the filename; a user-selected directory is the only
-	// configurable target. Ignore stale/invalid names from older configs.
+	filename := definition.File
 	if expected, supported := config.ClientConfigFileFor(definition.Category); supported {
 		filename = expected
-	} else if filename == "" {
-		filename = definition.File
 	}
 	if directory == "" || filename == "" {
 		return directory, ""
@@ -130,7 +128,7 @@ func discoverClientConfigPaths(existing map[string]config.ClientConfig) (map[str
 			continue
 		}
 		_, file := clientConfigPath(definition, config.ClientConfig{ConfigDir: directory, ConfigFile: definition.File})
-		if pathExists(directory) || pathExists(file) {
+		if clientConfigDetected(definition, directory, file) {
 			entry.ConfigDir = directory
 			entry.ConfigFile = definition.File
 			result[definition.Category] = entry
@@ -159,16 +157,50 @@ func publicClientConfigs(cfg config.AppConfig) []PublicClientConfig {
 func inspectClientConfig(cfg config.AppConfig, definition clientDefinition) PublicClientConfig {
 	entry := cfg.ClientConfigs[definition.Category]
 	directory, file := clientConfigPath(definition, entry)
-	status := PublicClientConfig{Category: definition.Category, Label: definition.Label, ConfigDir: directory, ConfigFile: file, SkipConfigReplacement: entry.SkipConfigReplacement, RequiresProfile: definition.RequiresProfile, Status: clientStatusNotDetected, StatusText: "未检测到配置"}
+	status := PublicClientConfig{Category: definition.Category, Label: definition.Label, ConfigDir: directory, ConfigFile: file, SkipConfigReplacement: entry.SkipConfigReplacement, OfficialBackupAvailable: len(entry.OfficialBackups) > 0, RequiresProfile: definition.RequiresProfile, Status: clientStatusNotDetected, StatusText: "未检测到配置"}
+	official := entry.Mode == "official" && strings.TrimSpace(cfg.ActiveProfiles[definition.Category]) == ""
 	if definition.Kind == "unsupported" {
 		status.Status = clientStatusUnsupported
 		status.StatusText = "暂不支持自动配置"
 		return status
 	}
-	if !pathExists(directory) && !pathExists(file) {
+	if !clientConfigDetected(definition, directory, file) {
+		if official {
+			status.Status = clientStatusNotConfigured
+			status.StatusText = "使用官方配置"
+		}
 		return status
 	}
 	status.Detected = true
+	if definition.Kind == "codex" {
+		configData, configErr := os.ReadFile(file)
+		if configErr != nil && !errors.Is(configErr, os.ErrNotExist) {
+			status.Status = clientStatusError
+			status.StatusText = "配置读取失败"
+			status.Error = configErr.Error()
+			return status
+		}
+		authData, authErr := os.ReadFile(filepath.Join(directory, "auth.json"))
+		if authErr != nil && !errors.Is(authErr, os.ErrNotExist) {
+			status.Status = clientStatusError
+			status.StatusText = "配置读取失败"
+			status.Error = authErr.Error()
+			return status
+		}
+		official, officialErr := codexOfficialConfigurationMatches(configData, authData)
+		if officialErr != nil {
+			status.Status = clientStatusError
+			status.StatusText = "配置读取失败"
+			status.Error = officialErr.Error()
+			return status
+		}
+		if official {
+			status.Status = clientStatusNotConfigured
+			status.StatusText = "使用官方配置"
+			status.LastChecked = time.Now().Format(time.RFC3339)
+			return status
+		}
+	}
 	endpoint := clientProxyURL(cfg, definition.Category)
 	expectedModel := ""
 	if profile := activeProfileForClient(cfg, definition.Category, ""); profile != nil {
@@ -187,24 +219,38 @@ func inspectClientConfig(cfg config.AppConfig, definition clientDefinition) Publ
 		status.Configured = true
 	} else {
 		status.Status = clientStatusNotConfigured
-		status.StatusText = "未使用 CodexRelay 配置"
+		if official {
+			status.StatusText = "使用官方配置"
+		} else {
+			status.StatusText = "未使用 CodexRelay 配置"
+		}
 	}
 	status.LastChecked = time.Now().Format(time.RFC3339)
 	return status
 }
 
-func clientProxyURL(source any, category string) string {
+func clientConfigDetected(definition clientDefinition, directory, file string) bool {
+	paths := []string{file}
+	switch definition.Kind {
+	case "codex":
+		paths = append(paths, filepath.Join(directory, "auth.json"))
+	case "gemini":
+		paths = append(paths, filepath.Join(directory, "settings.json"))
+	}
+	for _, path := range paths {
+		if pathExists(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func clientProxyURL(cfg config.AppConfig, category string) string {
 	port := config.DefaultProxyPort
 	host := "127.0.0.1"
-	switch value := source.(type) {
-	case config.AppConfig:
-		port = value.ProxyPort
-		if configuredHost := strings.TrimSpace(value.ClientAccessHost); configuredHost != "" {
-			host = configuredHost
-		}
-	case int:
-		// 保留旧的内部调用契约；仅完整 AppConfig 能携带非默认访问主机。
-		port = value
+	port = cfg.ProxyPort
+	if configuredHost := strings.TrimSpace(cfg.ClientAccessHost); configuredHost != "" {
+		host = configuredHost
 	}
 	if port <= 0 {
 		port = config.DefaultProxyPort
@@ -328,7 +374,12 @@ func clientConfigurationMatches(definition clientDefinition, directory, file, en
 				return false, fmt.Errorf("解析 auth.json: %w", err)
 			}
 		}
-		matches := provider == "codexrelay" && baseURL == endpoint && stringField(auth, "OPENAI_API_KEY") == key
+		// Codex's Responses API provider and local API-key auth are both Relay
+		// ownership markers. Requiring the exact auth object prevents an OAuth
+		// config or unrelated credentials from being treated as managed.
+		wireAPI := tomlSectionValue(string(configData), "model_providers.codexrelay", "wire_api")
+		requiresOpenAIAuth := tomlSectionValue(string(configData), "model_providers.codexrelay", "requires_openai_auth")
+		matches := provider == "codexrelay" && baseURL == endpoint && wireAPI == "responses" && requiresOpenAIAuth == "true" && len(auth) == 1 && stringField(auth, "OPENAI_API_KEY") == key
 		if expectedModel != "" {
 			matches = matches && tomlTopLevelValue(string(configData), "model") == expectedModel
 		} else if expectNoModel {
@@ -539,19 +590,141 @@ func Inspect(cfg config.AppConfig, category string) (PublicClientConfig, error) 
 	return inspectClientConfig(cfg, definition), nil
 }
 
-// Configure 备份并写入指定外部客户端配置；配置内容来自当前本地快照。
-func Configure(cfg config.AppConfig, category, profileID string) error {
-	_, err := ConfigureWithResult(cfg, category, profileID)
-	return err
+// ValidateClientConfigTargets rejects configurations where two adapters would
+// write the same physical file. Their official snapshots are category-scoped,
+// so allowing an overlap would make one adapter's restore erase another's.
+func ValidateClientConfigTargets(clients map[string]config.ClientConfig) error {
+	type targetOwner struct {
+		label string
+	}
+	owners := make(map[string]targetOwner)
+	for _, definition := range clientDefinitions() {
+		if definition.Kind == "unsupported" {
+			continue
+		}
+		entry := clients[definition.Category]
+		directory, file := clientConfigPath(definition, entry)
+		if strings.TrimSpace(file) == "" {
+			continue
+		}
+		paths := []string{file}
+		if definition.Kind == "codex" {
+			paths = append(paths, filepath.Join(directory, "auth.json"))
+		}
+		if definition.Kind == "gemini" {
+			paths = append(paths, filepath.Join(directory, "settings.json"))
+		}
+		for _, path := range paths {
+			cleaned := filepath.Clean(path)
+			key := cleaned
+			if runtime.GOOS == "windows" {
+				key = strings.ToLower(cleaned)
+			}
+			if previous, exists := owners[key]; exists {
+				return fmt.Errorf("%s 与 %s 不能使用同一个配置文件 %s", definition.Label, previous.label, cleaned)
+			}
+			owners[key] = targetOwner{label: definition.Label}
+		}
+	}
+	return nil
 }
 
-// ConfigureWithResult is the transactional variant of Configure. Every adapter
-// returns a rollback-capable result; callers may restore the exact pre-write
-// snapshot while it has not been changed again by another process.
-func ConfigureWithResult(cfg config.AppConfig, category, profileID string) (ConfigureResult, error) {
+// ValidateExternalClientDirectory prevents a client target from being placed
+// inside Relay's own data tree, where generated files and official snapshots
+// would otherwise share the same namespace.
+func ValidateExternalClientDirectory(dataDirectory, clientDirectory string) error {
+	dataDirectory = filepath.Clean(strings.TrimSpace(dataDirectory))
+	clientDirectory = filepath.Clean(strings.TrimSpace(clientDirectory))
+	if dataDirectory == "" || clientDirectory == "" || !filepath.IsAbs(dataDirectory) || !filepath.IsAbs(clientDirectory) {
+		return errors.New("客户端配置目录必须是绝对路径")
+	}
+	root := dataDirectory
+	target := clientDirectory
+	if runtime.GOOS == "windows" {
+		root = strings.ToLower(root)
+		target = strings.ToLower(target)
+	}
+	relative, err := filepath.Rel(root, target)
+	if err != nil {
+		return fmt.Errorf("检查客户端配置目录失败: %w", err)
+	}
+	if relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))) {
+		return errors.New("客户端配置目录不能位于 CodexRelay 数据目录内")
+	}
+	return nil
+}
+
+// ValidateOfficialConfigFiles ensures persisted restore metadata can only
+// address files owned by the selected client adapter. The metadata lives in a
+// user-editable JSON file, so restore paths must not be trusted blindly.
+func ValidateOfficialConfigFiles(cfg config.AppConfig, category string, files []config.ClientConfigBackup) error {
+	definition, ok := clientDefinitionFor(category)
+	if !ok || definition.Kind == "unsupported" {
+		return errors.New("该 API 类别暂不支持官方配置恢复")
+	}
+	entry := cfg.ClientConfigs[category]
+	directory, file := clientConfigPath(definition, entry)
+	allowed := map[string]struct{}{filepath.Clean(file): struct{}{}}
+	if definition.Kind == "codex" {
+		allowed[filepath.Join(directory, "auth.json")] = struct{}{}
+	}
+	if definition.Kind == "gemini" {
+		allowed[filepath.Join(directory, ".env")] = struct{}{}
+		allowed[filepath.Join(directory, "settings.json")] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(files))
+	for _, backup := range files {
+		path := filepath.Clean(strings.TrimSpace(backup.Path))
+		if path == "." || !filepath.IsAbs(path) {
+			return errors.New("官方配置恢复路径无效")
+		}
+		if _, ok := allowed[path]; !ok {
+			return fmt.Errorf("官方配置恢复路径不属于 %s 客户端", definition.Label)
+		}
+		if _, ok := seen[path]; ok {
+			return errors.New("官方配置恢复路径重复")
+		}
+		seen[path] = struct{}{}
+		backupPath := filepath.Clean(strings.TrimSpace(backup.BackupPath))
+		if backup.Existed {
+			if filepath.IsAbs(backupPath) || filepath.Dir(backupPath) != filepath.Join("client-backups", category) || !strings.HasSuffix(backupPath, ".CodexRelay") || backup.BackupSHA256 == "" {
+				return errors.New("官方配置备份路径无效")
+			}
+		} else if strings.TrimSpace(backup.BackupPath) != "" || strings.TrimSpace(backup.BackupSHA256) != "" {
+			return errors.New("不存在的官方配置文件不能包含备份数据")
+		}
+		if strings.TrimSpace(backup.ExpectedSHA256) == "" {
+			return errors.New("官方配置恢复指纹缺失")
+		}
+	}
+	return nil
+}
+
+// ResolveOfficialConfigFiles validates relative metadata before resolving it
+// against the current Relay data directory. Originals remain client-owned.
+func ResolveOfficialConfigFiles(cfg config.AppConfig, category, dataDirectory string) ([]config.ClientConfigBackup, error) {
+	files := cfg.ClientConfigs[category].OfficialBackups
+	if err := ValidateOfficialConfigFiles(cfg, category, files); err != nil {
+		return nil, err
+	}
+	resolved := append([]config.ClientConfigBackup(nil), files...)
+	for index := range resolved {
+		if resolved[index].Existed {
+			resolved[index].BackupPath = filepath.Join(dataDirectory, resolved[index].BackupPath)
+		}
+	}
+	return resolved, nil
+}
+
+// ConfigureWithResult stores original client files in the supplied Relay data
+// directory and returns a rollback-capable result for the external write.
+func ConfigureWithResult(cfg config.AppConfig, category, profileID, dataDirectory string) (ConfigureResult, error) {
 	definition, ok := clientDefinitionFor(category)
 	if !ok || definition.Kind == "unsupported" {
 		return ConfigureResult{}, errors.New("该 API 类别暂不支持自动配置，请手动配置")
+	}
+	if err := ValidateClientConfigTargets(cfg.ClientConfigs); err != nil {
+		return ConfigureResult{}, err
 	}
 	entry := cfg.ClientConfigs[category]
 	if err := config.ValidateClientConfig(category, entry); err != nil {
@@ -564,11 +737,63 @@ func ConfigureWithResult(cfg config.AppConfig, category, profileID string) (Conf
 	if strings.TrimSpace(file) == "" {
 		return ConfigureResult{}, errors.New("未找到客户端默认配置目录，请先在高级设置中设置配置目录")
 	}
+	if strings.TrimSpace(dataDirectory) == "" || !filepath.IsAbs(dataDirectory) {
+		return ConfigureResult{}, errors.New("CodexRelay 数据目录必须是绝对路径")
+	}
+	if err := ValidateExternalClientDirectory(dataDirectory, directory); err != nil {
+		return ConfigureResult{}, err
+	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return ConfigureResult{}, fmt.Errorf("创建配置目录: %w", err)
 	}
+	legacyCodexProviderID := ""
+	codexCurrentlyOfficial := false
+	if definition.Kind == "codex" {
+		var configData []byte
+		if data, readErr := os.ReadFile(file); readErr == nil {
+			configData = data
+			legacyCodexProviderID = tomlTopLevelValue(string(data), "model_provider")
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return ConfigureResult{}, fmt.Errorf("读取 Codex config.toml 失败: %w", readErr)
+		}
+		authData, authErr := os.ReadFile(filepath.Join(directory, "auth.json"))
+		if authErr != nil && !errors.Is(authErr, os.ErrNotExist) {
+			return ConfigureResult{}, fmt.Errorf("读取 Codex auth.json 失败: %w", authErr)
+		}
+		codexCurrentlyOfficial, authErr = codexOfficialConfigurationMatches(configData, authData)
+		if authErr != nil {
+			return ConfigureResult{}, authErr
+		}
+	}
 	endpoint := clientProxyURL(cfg, category)
 	key := strings.TrimSpace(cfg.LocalAccessToken)
+	if len(entry.OfficialBackups) == 0 {
+		if owned, inspectErr := clientConfigurationMatches(definition, directory, file, endpoint, key, "", false); inspectErr == nil && owned {
+			return ConfigureResult{}, errors.New("检测到 CodexRelay 配置但缺少官方快照，已拒绝覆盖；请先恢复或清理当前客户端配置")
+		}
+	}
+	backupDirectory := ClientBackupDirectory(dataDirectory, category)
+	knownOfficialFiles := make(map[string]bool, len(cfg.ClientConfigs[category].OfficialBackups))
+	// When another tool has already restored the official files, the persisted
+	// Relay snapshot describes an older generation. The next explicit takeover
+	// must capture the files currently on disk as the new official baseline.
+	usePersistedOfficialSnapshot := entry.Mode != "official" && !codexCurrentlyOfficial
+	for _, backup := range cfg.ClientConfigs[category].OfficialBackups {
+		if !usePersistedOfficialSnapshot {
+			continue
+		}
+		if err := validateStoredOfficialBackup(cfg, category, backup, backupDirectory); err != nil {
+			return ConfigureResult{}, err
+		}
+		knownOfficialFiles[filepath.Clean(backup.Path)] = backup.Existed
+	}
+	shouldBackup := func(path string) bool {
+		_, known := knownOfficialFiles[filepath.Clean(path)]
+		// The first transaction fixes the original file set. A file that was
+		// absent then remains Relay-created and must not produce an unreferenced
+		// backup on every later write.
+		return !known
+	}
 	profile := activeProfileForClient(cfg, category, profileID)
 	var models []config.ModelEntry
 	defaultModel := ""
@@ -580,37 +805,61 @@ func ConfigureWithResult(cfg config.AppConfig, category, profileID string) (Conf
 	var err error
 	switch definition.Kind {
 	case "claude":
-		result, err = configureSingleResult(file, func(existing []byte) ([]byte, error) {
+		result, err = configureSingleResultWithBackupPolicy(file, func(existing []byte) ([]byte, error) {
 			return renderClaude(existing, endpoint, key, models, defaultModel)
-		})
+		}, shouldBackup, backupDirectory)
 	case "gemini":
-		result, err = configureGeminiResult(directory, filepath.Join(directory, ".env"), endpoint, key, models, defaultModel)
+		result, err = configureGeminiResultWithBackupPolicy(directory, filepath.Join(directory, ".env"), endpoint, key, models, defaultModel, shouldBackup, backupDirectory)
 	case "opencode":
-		result, err = configureSingleResult(file, func(existing []byte) ([]byte, error) {
+		result, err = configureSingleResultWithBackupPolicy(file, func(existing []byte) ([]byte, error) {
 			return renderOpenCode(existing, endpoint, key, models, defaultModel)
-		})
+		}, shouldBackup, backupDirectory)
 	case "openclaw":
-		result, err = configureSingleResult(file, func(existing []byte) ([]byte, error) {
+		result, err = configureSingleResultWithBackupPolicy(file, func(existing []byte) ([]byte, error) {
 			return renderOpenClaw(existing, endpoint, key, models, defaultModel)
-		})
+		}, shouldBackup, backupDirectory)
 	case "codex":
-		result, err = configureCodexResult(file, filepath.Join(directory, "auth.json"), endpoint, key, defaultModel)
+		result, err = configureCodexResultWithBackupPolicy(file, filepath.Join(directory, "auth.json"), endpoint, key, defaultModel, shouldBackup, backupDirectory)
 	case "grok":
-		result, err = configureSingleResult(file, func(existing []byte) ([]byte, error) {
+		result, err = configureSingleResultWithBackupPolicy(file, func(existing []byte) ([]byte, error) {
 			return renderGrok(existing, endpoint, key, models, defaultModel)
-		})
+		}, shouldBackup, backupDirectory)
 	case "hermes":
-		result, err = configureSingleResult(file, func(existing []byte) ([]byte, error) {
+		result, err = configureSingleResultWithBackupPolicy(file, func(existing []byte) ([]byte, error) {
 			return renderHermes(existing, endpoint, key, models, defaultModel)
-		})
+		}, shouldBackup, backupDirectory)
 	default:
 		return ConfigureResult{}, errors.New("该 API 类别暂不支持自动配置，请手动配置")
 	}
 	if err != nil {
 		return result, err
 	}
+	result.OfficialSnapshot = true
+	result.ResetOfficialSnapshot = codexCurrentlyOfficial
 	configured, inspectErr := clientConfigurationMatches(definition, directory, file, endpoint, key, selectedModelID(models, defaultModel), models != nil)
 	if inspectErr == nil && configured {
+		if definition.Kind == "codex" {
+			historyRollback, migrationErr := migrateCodexHistoryProviderBucket(directory, dataDirectory, legacyCodexProviderID)
+			if migrationErr != nil {
+				configRollbackErr := error(nil)
+				if result.Rollback != nil {
+					configRollbackErr = result.Rollback()
+				}
+				if configRollbackErr != nil {
+					return result, fmt.Errorf("迁移 Codex 历史会话失败，请先关闭 Codex 后重试: %v；配置回退失败: %w", migrationErr, configRollbackErr)
+				}
+				return result, fmt.Errorf("迁移 Codex 历史会话失败，请先关闭 Codex 后重试: %w", migrationErr)
+			}
+			if historyRollback != nil {
+				configRollback := result.Rollback
+				result.Rollback = func() error {
+					if configRollback == nil {
+						return historyRollback()
+					}
+					return errors.Join(historyRollback(), configRollback())
+				}
+			}
+		}
 		return result, nil
 	}
 	rollbackErr := error(nil)
@@ -626,14 +875,37 @@ func ConfigureWithResult(cfg config.AppConfig, category, profileID string) (Conf
 	return result, fmt.Errorf("外部客户端配置未生效，已恢复原配置: %w", inspectErr)
 }
 
-func configureSingleResult(path string, render func(existing []byte) ([]byte, error)) (ConfigureResult, error) {
-	return applyConfigTransaction([]string{path}, func(snapshots map[string]configFileSnapshot) ([]ConfigFileChange, error) {
+func validateStoredOfficialBackup(cfg config.AppConfig, category string, backup config.ClientConfigBackup, categoryBackupDirectory string) error {
+	if err := ValidateOfficialConfigFiles(cfg, category, []config.ClientConfigBackup{backup}); err != nil {
+		return fmt.Errorf("官方配置备份信息无效: %w", err)
+	}
+	if !backup.Existed {
+		return nil
+	}
+	dataDirectory := filepath.Dir(filepath.Dir(categoryBackupDirectory))
+	backupPath := filepath.Join(dataDirectory, backup.BackupPath)
+	data, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("读取 %s 官方备份失败: %w", filepath.Base(backup.Path), err)
+	}
+	if backup.BackupSHA256 == "" || sha256Hex(data) != backup.BackupSHA256 {
+		return fmt.Errorf("%s 官方备份校验失败，请先恢复或清理该客户端的官方快照", filepath.Base(backup.Path))
+	}
+	return nil
+}
+
+func configureSingleResult(path string, render func(existing []byte) ([]byte, error), backupDirectory ...string) (ConfigureResult, error) {
+	return configureSingleResultWithBackupPolicy(path, render, nil, backupDirectory...)
+}
+
+func configureSingleResultWithBackupPolicy(path string, render func(existing []byte) ([]byte, error), shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
+	return applyConfigTransactionWithBackupPolicy([]string{path}, func(snapshots map[string]configFileSnapshot) ([]ConfigFileChange, error) {
 		data, err := render(snapshots[path].data)
 		if err != nil {
 			return nil, err
 		}
 		return []ConfigFileChange{{Path: path, Data: data}}, nil
-	})
+	}, shouldBackup, backupDirectory...)
 }
 
 // ConfigFileFor 返回分类的默认配置文件名，用于保存高级设置中的自定义目录。

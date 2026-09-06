@@ -49,17 +49,20 @@ func (s *DesktopService) SetProxyPort(port int) error {
 	}
 	nextConfig := state.Config
 	nextConfig.ProxyPort = port
-	clientResults, err := syncManagedClientConfigs(state.Config, nextConfig)
+	clientResults, err := syncManagedClientConfigs(state.Config, nextConfig, s.runtime.DataDirectory())
 	if err != nil {
 		_ = listener.Close()
 		return err
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		cfg.ProxyPort = port
+		for _, item := range clientResults {
+			rememberOfficialConfig(cfg, item.Category, item.Result)
+		}
 		return nil
 	}); err != nil {
 		_ = listener.Close()
-		if rollbackErr := rollbackClientConfigs(clientResults); rollbackErr != nil {
+		if rollbackErr := rollbackManagedClientConfigs(clientResults); rollbackErr != nil {
 			return fmt.Errorf("保存监听端口失败: %v；客户端配置回退失败: %w", err, rollbackErr)
 		}
 		return err
@@ -67,9 +70,10 @@ func (s *DesktopService) SetProxyPort(port int) error {
 	if !s.installProxyListener(server, listener) {
 		restoreConfigErr := s.updateConfig(func(cfg *config.AppConfig) error {
 			cfg.ProxyPort = state.Config.ProxyPort
+			cfg.ClientConfigs = config.Clone(state.Config).ClientConfigs
 			return nil
 		})
-		rollbackErr := rollbackClientConfigs(clientResults)
+		rollbackErr := rollbackManagedClientConfigs(clientResults)
 		_ = listener.Close()
 		if restoreConfigErr != nil || rollbackErr != nil {
 			return fmt.Errorf("代理监听切换失败；本地配置恢复错误: %v；客户端配置回退错误: %v", restoreConfigErr, rollbackErr)
@@ -120,36 +124,59 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 // configured for CodexRelay. It uses the prospective network settings while
 // preserving the current settings for the status check, so changing a port or
 // listen scope cannot silently take over an unrelated client configuration.
-func syncManagedClientConfigs(previous, next config.AppConfig) ([]clientconfig.ConfigureResult, error) {
-	results := make([]clientconfig.ConfigureResult, 0)
+type managedClientConfigResult struct {
+	Category string
+	Result   clientconfig.ConfigureResult
+}
+
+func syncManagedClientConfigs(previous, next config.AppConfig, dataDirectory string) ([]managedClientConfigResult, error) {
+	results := make([]managedClientConfigResult, 0)
 	for _, category := range config.Categories {
 		if !clientconfig.Supports(category) {
 			continue
 		}
 		entry := previous.ClientConfigs[category]
-		if entry.SkipConfigReplacement || (strings.TrimSpace(previous.ActiveProfiles[category]) == "" && clientconfig.RequiresProfile(category)) {
+		if entry.SkipConfigReplacement || entry.Mode != "relay" || len(entry.OfficialBackups) == 0 ||
+			(strings.TrimSpace(previous.ActiveProfiles[category]) == "" && clientconfig.RequiresProfile(category)) {
 			continue
 		}
 		status, err := clientconfig.Inspect(previous, category)
 		if err != nil {
-			return nil, clientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %w", category, err), results)
+			return nil, managedClientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %w", category, err), results)
 		}
 		if status.Status == "error" {
-			return nil, clientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %s", category, status.Error), results)
+			return nil, managedClientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %s", category, status.Error), results)
 		}
-		if !status.Configured {
-			continue
-		}
-		result, err := clientconfig.ConfigureWithResult(next, category, next.ActiveProfiles[category])
+		result, err := clientconfig.ConfigureWithResult(next, category, next.ActiveProfiles[category], dataDirectory)
 		if err != nil {
-			if rollbackErr := rollbackClientConfigs(results); rollbackErr != nil {
+			if rollbackErr := rollbackManagedClientConfigs(results); rollbackErr != nil {
 				return nil, fmt.Errorf("同步 %s 客户端配置失败: %v；此前客户端配置回退失败: %w", category, err, rollbackErr)
 			}
 			return nil, fmt.Errorf("同步 %s 客户端配置失败: %w", category, err)
 		}
-		results = append(results, result)
+		results = append(results, managedClientConfigResult{Category: category, Result: result})
 	}
 	return results, nil
+}
+
+func rollbackManagedClientConfigs(results []managedClientConfigResult) error {
+	var firstErr error
+	for index := len(results) - 1; index >= 0; index-- {
+		if results[index].Result.Rollback == nil {
+			continue
+		}
+		if err := results[index].Result.Rollback(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func managedClientConfigRollbackError(original error, results []managedClientConfigResult) error {
+	if rollbackErr := rollbackManagedClientConfigs(results); rollbackErr != nil {
+		return fmt.Errorf("%v；此前客户端配置回退失败: %w", original, rollbackErr)
+	}
+	return original
 }
 
 // SetClientAccessHost 更新写入外部客户端的访问主机。监听端口和类别路径由
@@ -173,15 +200,18 @@ func (s *DesktopService) SetClientAccessHost(raw string) error {
 	}
 	next := state.Config
 	next.ClientAccessHost = host
-	results, err := syncManagedClientConfigs(state.Config, next)
+	results, err := syncManagedClientConfigs(state.Config, next, s.runtime.DataDirectory())
 	if err != nil {
 		return err
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		cfg.ClientAccessHost = host
+		for _, item := range results {
+			rememberOfficialConfig(cfg, item.Category, item.Result)
+		}
 		return nil
 	}); err != nil {
-		return clientConfigRollbackError(fmt.Errorf("保存客户端访问主机失败: %w", err), results)
+		return managedClientConfigRollbackError(fmt.Errorf("保存客户端访问主机失败: %w", err), results)
 	}
 	return nil
 }

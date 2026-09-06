@@ -307,7 +307,7 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 	previousID := state.Config.ActiveProfiles[category]
 	var configResult clientconfig.ConfigureResult
 	entry := state.Config.ClientConfigs[category]
-	// 兼容旧绑定：只同步已经由 CodexRelay 接管的客户端；尚未接管的
+	// 后台令牌启用只同步已经由 CodexRelay 接管的客户端；尚未接管的
 	// 外部配置仍须等待用户在主界面明确确认。
 	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
 		status, inspectErr := clientconfig.Inspect(state.Config, category)
@@ -317,8 +317,8 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
-		if status.Configured {
-			configResult, err = clientconfig.ConfigureWithResult(next, category, profileID)
+		if entry.Mode == "relay" && len(entry.OfficialBackups) > 0 {
+			configResult, err = clientconfig.ConfigureWithResult(next, category, profileID, s.runtime.DataDirectory())
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
@@ -336,6 +336,9 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 			cfg.ActiveProfiles = map[string]string{}
 		}
 		cfg.ActiveProfiles[category] = profileID
+		if configResult.Rollback != nil {
+			rememberOfficialConfig(cfg, category, configResult)
+		}
 		return nil
 	})
 	if err != nil {

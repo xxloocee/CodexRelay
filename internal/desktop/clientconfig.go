@@ -70,8 +70,34 @@ func (s *DesktopService) SetClientConfigPath(category, directory string) error {
 	if !filepath.IsAbs(directory) {
 		return errors.New("配置目录必须是绝对路径")
 	}
+	if err := clientconfig.ValidateExternalClientDirectory(s.runtime.DataDirectory(), directory); err != nil {
+		return err
+	}
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	entry := state.Config.ClientConfigs[category]
+	if filepath.Clean(entry.ConfigDir) != filepath.Clean(directory) {
+		// A Relay-managed directory (including legacy state without a persisted
+		// snapshot) cannot be orphaned by merely changing the pointer. The old
+		// files and any restore metadata must remain tied to the old directory.
+		if entry.Mode == "relay" || len(entry.OfficialBackups) > 0 {
+			return errors.New("客户端仍由 CodexRelay 接管，请先切回官方配置后再修改目录")
+		}
+		status, inspectErr := clientconfig.Inspect(state.Config, category)
+		if inspectErr != nil {
+			return fmt.Errorf("检查旧客户端配置失败: %w", inspectErr)
+		}
+		if status.Status == "error" {
+			return fmt.Errorf("检查旧客户端配置失败: %s", status.Error)
+		}
+		if status.Configured {
+			return errors.New("客户端当前文件仍是 CodexRelay 配置，请先切回官方配置后再修改目录")
+		}
+	}
 	return s.updateConfig(func(cfg *config.AppConfig) error {
 		if cfg.ClientConfigs == nil {
 			cfg.ClientConfigs = map[string]config.ClientConfig{}
@@ -80,6 +106,9 @@ func (s *DesktopService) SetClientConfigPath(category, directory string) error {
 		entry.ConfigDir = filepath.Clean(directory)
 		entry.ConfigFile = configFile
 		cfg.ClientConfigs[category] = entry
+		if err := clientconfig.ValidateClientConfigTargets(cfg.ClientConfigs); err != nil {
+			return err
+		}
 		return nil
 	})
 }
@@ -117,7 +146,21 @@ func (s *DesktopService) ConfigureClient(category, profileID string) error {
 	if state == nil {
 		return errors.New("程序尚未初始化")
 	}
-	if err := clientconfig.Configure(state.Config, strings.TrimSpace(category), strings.TrimSpace(profileID)); err != nil {
+	category = strings.TrimSpace(category)
+	profileID = strings.TrimSpace(profileID)
+	result, err := clientconfig.ConfigureWithResult(state.Config, category, profileID, s.runtime.DataDirectory())
+	if err != nil {
+		return err
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		rememberOfficialConfig(cfg, category, result)
+		return nil
+	}); err != nil {
+		if result.Rollback != nil {
+			if rollbackErr := result.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("保存客户端配置状态失败: %v；外部配置回退失败: %w", err, rollbackErr)
+			}
+		}
 		return err
 	}
 	s.notifyStateChanged()
@@ -135,6 +178,7 @@ func (s *DesktopService) ConfigureDetectedClients() error {
 		return errors.New("程序尚未初始化")
 	}
 	results := make([]clientconfig.ConfigureResult, 0)
+	officialResults := make(map[string]clientconfig.ConfigureResult)
 	for _, category := range config.Categories {
 		if !clientconfig.Supports(category) {
 			continue
@@ -156,7 +200,7 @@ func (s *DesktopService) ConfigureDetectedClients() error {
 		if clientconfig.RequiresProfile(category) && strings.TrimSpace(state.Config.ActiveProfiles[category]) == "" {
 			continue
 		}
-		result, err := clientconfig.ConfigureWithResult(state.Config, category, state.Config.ActiveProfiles[category])
+		result, err := clientconfig.ConfigureWithResult(state.Config, category, state.Config.ActiveProfiles[category], s.runtime.DataDirectory())
 		if err != nil {
 			if rollbackErr := rollbackClientConfigs(results); rollbackErr != nil {
 				return fmt.Errorf("配置 %s 客户端失败: %v；此前客户端配置回退失败: %w", category, err, rollbackErr)
@@ -164,6 +208,20 @@ func (s *DesktopService) ConfigureDetectedClients() error {
 			return fmt.Errorf("配置 %s 客户端失败: %w", category, err)
 		}
 		results = append(results, result)
+		officialResults[category] = result
+	}
+	if len(officialResults) > 0 {
+		if err := s.updateConfig(func(cfg *config.AppConfig) error {
+			for category, result := range officialResults {
+				rememberOfficialConfig(cfg, category, result)
+			}
+			return nil
+		}); err != nil {
+			if rollbackErr := rollbackClientConfigs(results); rollbackErr != nil {
+				return fmt.Errorf("保存客户端配置状态失败: %v；外部配置回退失败: %w", err, rollbackErr)
+			}
+			return err
+		}
 	}
 	s.notifyStateChanged()
 	return nil

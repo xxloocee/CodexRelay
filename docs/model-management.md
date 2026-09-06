@@ -25,11 +25,11 @@
 
 外部客户端配置只使用本地缓存，不在切换时请求上游模型接口。每次覆盖前读取原文件并生成：
 
-`<原文件>.<YYYYMMDD-HHMMSS>.CodexRelay`
+`<Relay 数据目录>/client-backups/<category>/<原文件>.<YYYYMMDD-HHMMSS>.CodexRelay`
 
 同一秒发生冲突时追加序号。Codex 的 `auth.json` 按产品约定直接写入 `OPENAI_API_KEY`，不保留 OAuth 分支。
 
-- Codex：写入 provider、地址和默认模型（若已设置），并覆盖 `auth.json`。
+- Codex：写入固定 provider ID `codexrelay`、展示名 `ergouzi.life`、地址和默认模型（若已设置），并覆盖 `auth.json`。
 - OpenCode：写入 `provider.codexrelay.models`，每个键为模型 ID，值保存显示名称。
 - OpenClaw：写入 `models.providers.codexrelay.models`，同时更新 `agents.defaults.model.primary` 和允许目录；没有缓存模型时不写入空模型数组。
 - Grok：写入 `[models]` 默认项及每个 `[model."<id>"]`；`context_window` 取模型条目的明确值，否则使用 cc-switch-main 适配器要求的 `500000`。
@@ -37,7 +37,7 @@
 - Claude：写入 `ANTHROPIC_MODEL` 以及四个默认角色模型环境变量，均使用缓存的默认模型。
 - Gemini：在 `.env` 中写入 `GEMINI_MODEL`，并继续更新地址、密钥和认证开关。
 
-JSON5 客户端仍使用现有解析和 JSON 输出路径；原文件会先备份，写入失败不会删除备份文件。
+JSON5 客户端仍使用现有解析和 JSON 输出路径；原文件会先备份到 Relay 数据目录的 `client-backups/<category>/`，写入失败不会删除备份文件。
 
 ## 未验证项
 

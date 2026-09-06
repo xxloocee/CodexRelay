@@ -202,7 +202,7 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 			!sameClientRenderedProfile(previous, prospective)
 		if shouldSync && clientconfig.Supports(prospective.Category) {
 			entry := state.Config.ClientConfigs[prospective.Category]
-			if !entry.SkipConfigReplacement {
+			if !entry.SkipConfigReplacement && entry.Mode == "relay" && len(entry.OfficialBackups) > 0 {
 				status, inspectErr := clientconfig.Inspect(state.Config, prospective.Category)
 				if inspectErr != nil {
 					return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
@@ -210,11 +210,9 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 				if status.Status == "error" {
 					return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 				}
-				if status.Configured {
-					configResult, err = clientconfig.ConfigureWithResult(next, prospective.Category, prospective.ID)
-					if err != nil {
-						return fmt.Errorf("更新客户端配置失败: %w", err)
-					}
+				configResult, err = clientconfig.ConfigureWithResult(next, prospective.Category, prospective.ID, s.runtime.DataDirectory())
+				if err != nil {
+					return fmt.Errorf("更新客户端配置失败: %w", err)
 				}
 			}
 		}
@@ -232,6 +230,9 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 			}
 			if committedExisting != existing || (existing && (committed.ID != prospective.ID || (configResult.Rollback != nil && !sameClientRenderedProfile(prospective, committed)))) {
 				return errors.New("代理 API 已被并发修改，请重试")
+			}
+			if configResult.Rollback != nil {
+				rememberOfficialConfig(cfg, prospective.Category, configResult)
 			}
 			return nil
 		})
@@ -394,13 +395,110 @@ func (s *DesktopService) DeleteProfile(id string) error {
 }
 
 // ActivateProfile 启用指定 Profile。第二个参数用于明确控制是否同步外部
-// 客户端配置：桌面端确认配置时传 true，用户跳过或兼容旧调用时传 false。
+// 客户端配置：桌面端确认配置时传 true，用户跳过时传 false。
 // 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
 func (s *DesktopService) ActivateProfile(id string, configure ...bool) error {
+	if strings.HasPrefix(strings.TrimSpace(id), "official:") {
+		return s.activateOfficial(strings.TrimPrefix(strings.TrimSpace(id), "official:"))
+	}
 	applyClientConfig := len(configure) > 0 && configure[0]
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
 	return s.activateProfile(id, applyClientConfig)
+}
+
+// activateOfficial restores the client files captured before CodexRelay took
+// over this category, then removes the relay Profile mapping.
+func (s *DesktopService) activateOfficial(category string) error {
+	category = strings.TrimSpace(category)
+	if !config.IsCategory(category) {
+		return errors.New("官方客户端类别无效")
+	}
+	if !clientconfig.Supports(category) {
+		return errors.New("该 API 类别暂不支持官方配置恢复")
+	}
+	s.clientConfigMu.Lock()
+	defer s.clientConfigMu.Unlock()
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	entry := state.Config.ClientConfigs[category]
+	previousID := strings.TrimSpace(state.Config.ActiveProfiles[category])
+	status, inspectErr := clientconfig.Inspect(state.Config, category)
+	if inspectErr != nil {
+		return fmt.Errorf("检查 %s 当前配置失败: %w", category, inspectErr)
+	}
+	if category == config.CategoryCodex && status.Status == "not_configured" && status.StatusText == "使用官方配置" {
+		// The user may have switched to the native Codex login in another tool.
+		// Treat that state as an idempotent official activation instead of trying
+		// to overwrite it with an older Relay snapshot.
+		if err := s.updateConfig(func(cfg *config.AppConfig) error {
+			delete(cfg.ActiveProfiles, category)
+			if cfg.ClientConfigs == nil {
+				cfg.ClientConfigs = map[string]config.ClientConfig{}
+			}
+			client := cfg.ClientConfigs[category]
+			client.Mode = "official"
+			cfg.ClientConfigs[category] = client
+			return nil
+		}); err != nil {
+			return err
+		}
+		if previousID != "" {
+			s.runtime.ResetProfileHealth(previousID)
+		}
+		s.notifyStateChanged()
+		return nil
+	}
+	var rollback func() error
+	if len(entry.OfficialBackups) > 0 {
+		files, err := clientconfig.ResolveOfficialConfigFiles(state.Config, category, s.runtime.DataDirectory())
+		if err != nil {
+			return fmt.Errorf("官方配置恢复信息无效: %w", err)
+		}
+		rollback, err = clientconfig.RestoreOfficialConfigWithRollback(files)
+		if err != nil {
+			return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
+		}
+	} else {
+		return errors.New("没有可恢复的官方配置快照，请先配置客户端并生成官方备份")
+	}
+	if err := s.updateConfig(func(cfg *config.AppConfig) error {
+		delete(cfg.ActiveProfiles, category)
+		if cfg.ClientConfigs == nil {
+			cfg.ClientConfigs = map[string]config.ClientConfig{}
+		}
+		client := cfg.ClientConfigs[category]
+		client.Mode = "official"
+		client.OfficialBackups = nil
+		cfg.ClientConfigs[category] = client
+		return nil
+	}); err != nil {
+		if rollback != nil {
+			if restoreErr := rollback(); restoreErr != nil {
+				return fmt.Errorf("切换官方配置失败: %v；中继配置恢复失败: %w", err, restoreErr)
+			}
+		}
+		return err
+	}
+	if previousID != "" {
+		s.runtime.ResetProfileHealth(previousID)
+	}
+	s.switchMu.Lock()
+	delete(s.switchRounds, category)
+	delete(s.autoSwitchNotices, category)
+	delete(s.directoryRecoveryNotices, category)
+	if previousID != "" {
+		for key := range s.switchPrompts {
+			if strings.HasPrefix(key, previousID+"|") {
+				delete(s.switchPrompts, key)
+			}
+		}
+	}
+	s.switchMu.Unlock()
+	s.notifyStateChanged()
+	return nil
 }
 
 // activateProfileFromTray 只同步已经由 CodexRelay 接管的客户端。托盘点击是
@@ -420,6 +518,9 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 	entry := state.Config.ClientConfigs[category]
 	applyClientConfig := false
 	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
+		if entry.Mode != "relay" || len(entry.OfficialBackups) == 0 {
+			return errors.New("当前客户端尚未由 CodexRelay 接管，请在主界面确认配置后再从托盘切换")
+		}
 		status, err := clientconfig.Inspect(state.Config, category)
 		if err != nil {
 			return fmt.Errorf("检查客户端配置失败: %w", err)
@@ -427,7 +528,9 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
-		applyClientConfig = status.Configured
+		// A managed client must be repaired when its files were changed or
+		// removed outside Relay. The main window and tray must share this rule.
+		applyClientConfig = true
 	}
 	return s.activateProfile(id, applyClientConfig)
 }
@@ -449,7 +552,7 @@ func (s *DesktopService) activateProfile(id string, applyClientConfig bool) erro
 	clientConfigRendered := false
 	var err error
 	if applyClientConfig && clientconfig.Supports(category) && !state.Config.ClientConfigs[category].SkipConfigReplacement {
-		configResult, err = clientconfig.ConfigureWithResult(state.Config, category, id)
+		configResult, err = clientconfig.ConfigureWithResult(state.Config, category, id, s.runtime.DataDirectory())
 		if err != nil {
 			return fmt.Errorf("更新客户端配置失败: %w", err)
 		}
@@ -485,6 +588,9 @@ func (s *DesktopService) activateProfile(id string, applyClientConfig bool) erro
 				cfg.ActiveProfiles = map[string]string{}
 			}
 			cfg.ActiveProfiles[profile.Category] = id
+			if clientConfigRendered {
+				rememberOfficialConfig(cfg, profile.Category, configResult)
+			}
 			return nil
 		}
 		return errors.New("代理 API 不存在")
