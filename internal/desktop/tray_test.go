@@ -120,6 +120,7 @@ func TestNonHomeCustomProfileNameIncludesSource(t *testing.T) {
 
 func TestTrayEntriesFollowFailoverOrderAndFilterUnavailableProfiles(t *testing.T) {
 	cfg := config.Default(18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: t.TempDir(), ConfigFile: "config.toml"}
 	cfg.Profiles = []config.Profile{
 		{ID: "custom-first", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "自定义首项", APIKey: "sk-a"},
 		{ID: "doge-disabled", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "二狗子失效项", APIKey: "sk-b", RemoteTokenID: 42},
@@ -133,7 +134,7 @@ func TestTrayEntriesFollowFailoverOrderAndFilterUnavailableProfiles(t *testing.T
 	}
 	cfg.Doge.Groups = []string{"可用分组"}
 	entries := trayEntriesForCategory(cfg, config.CategoryCodex)
-	if len(entries) != 2 || entries[0].profileID != "custom-last" || entries[1].profileID != "custom-first" {
+	if len(entries) != 3 || entries[0].profileID != "official:codex" || entries[1].profileID != "custom-last" || entries[2].profileID != "custom-first" {
 		t.Fatalf("tray entries = %+v", entries)
 	}
 	for _, entry := range entries {
@@ -145,6 +146,8 @@ func TestTrayEntriesFollowFailoverOrderAndFilterUnavailableProfiles(t *testing.T
 
 func TestTrayEntriesHideCategoryWhenNoSelectableProfilesRemain(t *testing.T) {
 	cfg := config.Default(18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: t.TempDir(), ConfigFile: "config.toml"}
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{ConfigDir: t.TempDir(), ConfigFile: "settings.json"}
 	cfg.Profiles = []config.Profile{
 		{ID: "doge-disabled", Source: config.SourceDoge, Category: config.CategoryCodex, Name: "二狗子失效项", APIKey: "sk-b", RemoteTokenID: 42},
 	}

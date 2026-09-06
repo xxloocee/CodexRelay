@@ -202,7 +202,7 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 			!sameClientRenderedProfile(previous, prospective)
 		if shouldSync && clientconfig.Supports(prospective.Category) {
 			entry := state.Config.ClientConfigs[prospective.Category]
-			if !entry.SkipConfigReplacement && entry.Mode == "relay" && len(entry.OfficialBackups) > 0 {
+			if !entry.SkipConfigReplacement {
 				status, inspectErr := clientconfig.Inspect(state.Config, prospective.Category)
 				if inspectErr != nil {
 					return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
@@ -210,9 +210,11 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 				if status.Status == "error" {
 					return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 				}
-				configResult, err = clientconfig.ConfigureWithResult(next, prospective.Category, prospective.ID, s.runtime.DataDirectory())
-				if err != nil {
-					return fmt.Errorf("更新客户端配置失败: %w", err)
+				if clientconfig.IsManagedState(status.ConfigState) {
+					configResult, err = clientconfig.UpdateManagedWithResult(next, prospective.Category, prospective.ID, s.runtime.DataDirectory())
+					if err != nil {
+						return fmt.Errorf("更新客户端配置失败: %w", err)
+					}
 				}
 			}
 		}
@@ -394,17 +396,32 @@ func (s *DesktopService) DeleteProfile(id string) error {
 	})
 }
 
-// ActivateProfile 启用指定 Profile。第二个参数用于明确控制是否同步外部
-// 客户端配置：桌面端确认配置时传 true，用户跳过时传 false。
+type clientConfigWriteIntent uint8
+
+const (
+	clientConfigWriteNone clientConfigWriteIntent = iota
+	clientConfigWriteManaged
+	clientConfigWriteTakeover
+)
+
+// ActivateProfile 启用指定 Profile。第二个参数控制是否同步外部客户端；
+// 第三个参数只由用户确认接管的弹窗传 true。普通切换即使磁盘状态在检查后
+// 发生变化，也只能走已接管更新，不能降级为隐式覆盖。
 // 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
 func (s *DesktopService) ActivateProfile(id string, configure ...bool) error {
 	if strings.HasPrefix(strings.TrimSpace(id), "official:") {
 		return s.activateOfficial(strings.TrimPrefix(strings.TrimSpace(id), "official:"))
 	}
-	applyClientConfig := len(configure) > 0 && configure[0]
+	writeIntent := clientConfigWriteNone
+	if len(configure) > 0 && configure[0] {
+		writeIntent = clientConfigWriteManaged
+		if len(configure) > 1 && configure[1] {
+			writeIntent = clientConfigWriteTakeover
+		}
+	}
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
-	return s.activateProfile(id, applyClientConfig)
+	return s.activateProfile(id, writeIntent)
 }
 
 // activateOfficial restores the client files captured before CodexRelay took
@@ -429,30 +446,14 @@ func (s *DesktopService) activateOfficial(category string) error {
 	if inspectErr != nil {
 		return fmt.Errorf("检查 %s 当前配置失败: %w", category, inspectErr)
 	}
-	if category == config.CategoryCodex && status.Status == "not_configured" && status.StatusText == "使用官方配置" {
-		// The user may have switched to the native Codex login in another tool.
-		// Treat that state as an idempotent official activation instead of trying
-		// to overwrite it with an older Relay snapshot.
-		if err := s.updateConfig(func(cfg *config.AppConfig) error {
-			delete(cfg.ActiveProfiles, category)
-			if cfg.ClientConfigs == nil {
-				cfg.ClientConfigs = map[string]config.ClientConfig{}
-			}
-			client := cfg.ClientConfigs[category]
-			client.Mode = "official"
-			cfg.ClientConfigs[category] = client
-			return nil
-		}); err != nil {
-			return err
-		}
-		if previousID != "" {
-			s.runtime.ResetProfileHealth(previousID)
-		}
-		s.notifyStateChanged()
-		return nil
+	if status.Status == "error" {
+		return fmt.Errorf("检查 %s 当前配置失败: %s", category, status.Error)
 	}
 	var rollback func() error
-	if len(entry.OfficialBackups) > 0 {
+	if status.ConfigState == clientconfig.ClientConfigStateOfficial {
+		// Another tool may already have restored native OAuth while an older
+		// Relay snapshot remains. Consume only the stale metadata in that case.
+	} else if len(entry.OfficialBackups) > 0 {
 		files, err := clientconfig.ResolveOfficialConfigFiles(state.Config, category, s.runtime.DataDirectory())
 		if err != nil {
 			return fmt.Errorf("官方配置恢复信息无效: %w", err)
@@ -461,8 +462,8 @@ func (s *DesktopService) activateOfficial(category string) error {
 		if err != nil {
 			return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
 		}
-	} else {
-		return errors.New("没有可恢复的官方配置快照，请先配置客户端并生成官方备份")
+	} else if status.ConfigState == clientconfig.ClientConfigStateManagedWithoutSnapshot {
+		return errors.New("当前客户端由 CodexRelay 接管，但没有可恢复的官方快照；请先在客户端中恢复官方登录或清理 Relay 配置")
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		delete(cfg.ActiveProfiles, category)
@@ -516,11 +517,8 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 	}
 	category := state.Config.Profiles[index].Category
 	entry := state.Config.ClientConfigs[category]
-	applyClientConfig := false
+	writeIntent := clientConfigWriteNone
 	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
-		if entry.Mode != "relay" || len(entry.OfficialBackups) == 0 {
-			return errors.New("当前客户端尚未由 CodexRelay 接管，请在主界面确认配置后再从托盘切换")
-		}
 		status, err := clientconfig.Inspect(state.Config, category)
 		if err != nil {
 			return fmt.Errorf("检查客户端配置失败: %w", err)
@@ -528,14 +526,17 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
+		if !clientconfig.IsManagedState(status.ConfigState) {
+			return errors.New("当前客户端尚未由 CodexRelay 接管，请在主界面确认配置后再从托盘切换")
+		}
 		// A managed client must be repaired when its files were changed or
 		// removed outside Relay. The main window and tray must share this rule.
-		applyClientConfig = true
+		writeIntent = clientConfigWriteManaged
 	}
-	return s.activateProfile(id, applyClientConfig)
+	return s.activateProfile(id, writeIntent)
 }
 
-func (s *DesktopService) activateProfile(id string, applyClientConfig bool) error {
+func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWriteIntent) error {
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("程序尚未初始化")
@@ -551,8 +552,12 @@ func (s *DesktopService) activateProfile(id string, applyClientConfig bool) erro
 	var configResult clientconfig.ConfigureResult
 	clientConfigRendered := false
 	var err error
-	if applyClientConfig && clientconfig.Supports(category) && !state.Config.ClientConfigs[category].SkipConfigReplacement {
-		configResult, err = clientconfig.ConfigureWithResult(state.Config, category, id, s.runtime.DataDirectory())
+	if writeIntent != clientConfigWriteNone && clientconfig.Supports(category) && !state.Config.ClientConfigs[category].SkipConfigReplacement {
+		if writeIntent == clientConfigWriteTakeover {
+			configResult, err = clientconfig.ConfigureWithResult(state.Config, category, id, s.runtime.DataDirectory())
+		} else {
+			configResult, err = clientconfig.UpdateManagedWithResult(state.Config, category, id, s.runtime.DataDirectory())
+		}
 		if err != nil {
 			return fmt.Errorf("更新客户端配置失败: %w", err)
 		}

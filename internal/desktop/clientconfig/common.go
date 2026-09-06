@@ -80,6 +80,13 @@ func applyConfigTransaction(paths []string, render func(map[string]configFileSna
 // official snapshot to skip creating another unreferenced copy. A nil policy
 // backs up every existing source file.
 func applyConfigTransactionWithBackupPolicy(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
+	return applyConfigTransactionWithSnapshotPolicy(paths, render, nil, shouldBackup, backupDirectory...)
+}
+
+// applyConfigTransactionWithSnapshotPolicy runs validation against the same
+// immutable snapshots used for rendering. The later unchanged check closes the
+// gap between ownership validation and commit.
+func applyConfigTransactionWithSnapshotPolicy(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), validate func(map[string]configFileSnapshot) error, shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
 	result := ConfigureResult{}
 	snapshots := make([]configFileSnapshot, 0, len(paths))
 	byPath := make(map[string]configFileSnapshot, len(paths))
@@ -111,6 +118,11 @@ func applyConfigTransactionWithBackupPolicy(paths []string, render func(map[stri
 		}
 		snapshots = append(snapshots, snapshot)
 		byPath[path] = snapshot
+	}
+	if validate != nil {
+		if err := validate(byPath); err != nil {
+			return result, err
+		}
 	}
 	changes, err := render(byPath)
 	if err != nil {
@@ -412,7 +424,9 @@ func restoreConfigFilesTransaction(files []ConfigFileResult) (func() error, erro
 	targets := make([]restoreTarget, 0, len(files))
 	for _, file := range files {
 		if err := verifyConfigFileResult(file); err != nil {
-			return nil, err
+			if _, statErr := os.Stat(file.Path); !errors.Is(statErr, os.ErrNotExist) {
+				return nil, err
+			}
 		}
 		target := restoreTarget{file: file}
 		if file.Existed {
@@ -544,13 +558,20 @@ func restoreCurrentConfigFile(target restoreTarget) error {
 	current, err := os.ReadFile(target.file.Path)
 	info, statErr := os.Stat(target.file.Path)
 	if !target.currentExisted {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) && errors.Is(statErr, os.ErrNotExist) {
 			return nil
 		}
-		if err != nil {
+		desiredMode := os.FileMode(target.file.Mode)
+		if desiredMode == 0 {
+			desiredMode = 0o600
+		}
+		if err != nil || statErr != nil || !bytes.Equal(current, target.desired) || !clientFileModesEqual(info.Mode(), desiredMode) {
+			return errors.New("当前文件已被其他进程修改")
+		}
+		if err := os.Remove(target.file.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		return errors.New("当前文件已被其他进程修改")
+		return nil
 	}
 	desiredMode := os.FileMode(target.file.Mode)
 	if desiredMode == 0 {

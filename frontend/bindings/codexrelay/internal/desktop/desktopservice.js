@@ -21,8 +21,9 @@ import * as network$0 from "../network/models.js";
 import * as $models from "./models.js";
 
 /**
- * ActivateProfile 启用指定 Profile。第二个参数用于明确控制是否同步外部
- * 客户端配置：桌面端确认配置时传 true，用户跳过时传 false。
+ * ActivateProfile 启用指定 Profile。第二个参数控制是否同步外部客户端；
+ * 第三个参数只由用户确认接管的弹窗传 true。普通切换即使磁盘状态在检查后
+ * 发生变化，也只能走已接管更新，不能降级为隐式覆盖。
  * 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
  * @param {string} id
  * @param {boolean[]} configure

@@ -120,8 +120,8 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 	return nil
 }
 
-// syncManagedClientConfigs updates only clients whose current file is already
-// configured for CodexRelay. It uses the prospective network settings while
+// syncManagedClientConfigs updates only clients already owned by CodexRelay.
+// It uses the prospective network settings while
 // preserving the current settings for the status check, so changing a port or
 // listen scope cannot silently take over an unrelated client configuration.
 type managedClientConfigResult struct {
@@ -136,8 +136,7 @@ func syncManagedClientConfigs(previous, next config.AppConfig, dataDirectory str
 			continue
 		}
 		entry := previous.ClientConfigs[category]
-		if entry.SkipConfigReplacement || entry.Mode != "relay" || len(entry.OfficialBackups) == 0 ||
-			(strings.TrimSpace(previous.ActiveProfiles[category]) == "" && clientconfig.RequiresProfile(category)) {
+		if entry.SkipConfigReplacement || strings.TrimSpace(previous.ActiveProfiles[category]) == "" {
 			continue
 		}
 		status, err := clientconfig.Inspect(previous, category)
@@ -147,7 +146,10 @@ func syncManagedClientConfigs(previous, next config.AppConfig, dataDirectory str
 		if status.Status == "error" {
 			return nil, managedClientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %s", category, status.Error), results)
 		}
-		result, err := clientconfig.ConfigureWithResult(next, category, next.ActiveProfiles[category], dataDirectory)
+		if !clientconfig.IsManagedState(status.ConfigState) {
+			continue
+		}
+		result, err := clientconfig.UpdateManagedWithResult(next, category, next.ActiveProfiles[category], dataDirectory)
 		if err != nil {
 			if rollbackErr := rollbackManagedClientConfigs(results); rollbackErr != nil {
 				return nil, fmt.Errorf("同步 %s 客户端配置失败: %v；此前客户端配置回退失败: %w", category, err, rollbackErr)

@@ -66,16 +66,12 @@ export function createProfileList({
 
   function officialClientState(client) {
     const active = Boolean(String(serverState.snapshot?.activeProfiles?.[client.category] || "").trim());
-    const status = client.status || "not_detected";
     const backupAvailable = Boolean(client.officialBackupAvailable);
-    // A generic not_configured status can also mean a user's unrelated client
-    // setup. Only the backend's explicit official status represents current
-    // official mode, even when an older Relay snapshot is still retained.
-    const official = !active && status === "not_configured" && client.statusText === "使用官方配置";
-    // Without a saved Relay snapshot, the official action cannot restore the
-    // external file. Keep it visible for context but make the failed path
-    // explicit instead of allowing a click that is guaranteed to error.
-    const unavailable = !backupAvailable && !official;
+    const configState = client.configState || "unmanaged";
+    const official = !active && configState === "official";
+    // A managed legacy file without a pre-Relay snapshot can switch between
+    // Profiles, but there are no official bytes that can be restored safely.
+    const unavailable = configState === "managed_without_snapshot";
     return {
       current: !active && official,
       backupAvailable,

@@ -144,12 +144,14 @@ func trayEntriesForCategory(cfg config.AppConfig, category string) []trayMenuEnt
 	entries := make([]trayMenuEntry, 0, len(profilesByID)+1)
 	if clientconfig.Supports(category) {
 		client := cfg.ClientConfigs[category]
-		officialCurrent := trayOfficialCurrent(cfg, category)
+		status, inspectErr := clientconfig.Inspect(cfg, category)
+		officialCurrent := inspectErr == nil && strings.TrimSpace(cfg.ActiveProfiles[category]) == "" && status.ConfigState == clientconfig.ClientConfigStateOfficial
+		canClearRelayRoute := inspectErr == nil && strings.TrimSpace(cfg.ActiveProfiles[category]) != "" && status.ConfigState != clientconfig.ClientConfigStateManagedWithoutSnapshot
 		// The official entry is actionable only when the client is already in
 		// official mode or Relay has a captured snapshot to restore. Showing it
 		// for an unrelated/unconfigured client leads to a guaranteed restore
 		// failure because activateOfficial has no source files to recover.
-		if officialCurrent || len(client.OfficialBackups) > 0 {
+		if officialCurrent || len(client.OfficialBackups) > 0 || canClearRelayRoute {
 			entries = append(entries, trayMenuEntry{
 				category: category, profileID: "official:" + category, name: categoryLabel(category) + " 官方",
 				current: officialCurrent,
@@ -181,20 +183,11 @@ func trayOfficialCurrent(cfg config.AppConfig, category string) bool {
 	if strings.TrimSpace(cfg.ActiveProfiles[category]) != "" {
 		return false
 	}
-	// A consumed official snapshot is represented by Mode=official with no
-	// remaining backup metadata. If stale metadata remains, keep the tray item
-	// actionable rather than marking it as the current official state.
-	if len(cfg.ClientConfigs[category].OfficialBackups) > 0 {
-		return false
-	}
 	status, err := clientconfig.Inspect(cfg, category)
 	if err != nil {
 		return false
 	}
-	// Only an explicitly recorded official status is current. A generic
-	// not_configured result may simply be an unrelated or unavailable client
-	// configuration and must not be treated as an official restore state.
-	return status.Status == "not_configured" && status.StatusText == "使用官方配置"
+	return status.ConfigState == clientconfig.ClientConfigStateOfficial
 }
 
 func trayVisibleCategorySet(categories []string) map[string]bool {

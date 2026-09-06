@@ -34,7 +34,7 @@ func (s *DesktopService) scanClientConfigs() error {
 	if state == nil {
 		return errors.New("程序尚未初始化")
 	}
-	paths, changed := clientconfig.DiscoverConfigPaths(state.Config.ClientConfigs)
+	paths, changed := clientconfig.DiscoverConfigPaths(state.Config)
 	if !changed {
 		return nil
 	}
@@ -197,7 +197,7 @@ func (s *DesktopService) ConfigureDetectedClients() error {
 		if !status.Detected {
 			continue
 		}
-		if clientconfig.RequiresProfile(category) && strings.TrimSpace(state.Config.ActiveProfiles[category]) == "" {
+		if strings.TrimSpace(state.Config.ActiveProfiles[category]) == "" {
 			continue
 		}
 		result, err := clientconfig.ConfigureWithResult(state.Config, category, state.Config.ActiveProfiles[category], s.runtime.DataDirectory())

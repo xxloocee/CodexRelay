@@ -15,8 +15,7 @@ export function createShell({
 
   function officialClientIsCurrent(state, client) {
     const activeProfile = Boolean(String(state.activeProfiles?.[client.category] || "").trim());
-    return !activeProfile && !client.officialBackupAvailable &&
-      client.status === "not_configured" && client.statusText === "使用官方配置";
+    return !activeProfile && client.configState === "official";
   }
 
   function renderShell() {

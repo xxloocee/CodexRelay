@@ -317,8 +317,8 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
-		if entry.Mode == "relay" && len(entry.OfficialBackups) > 0 {
-			configResult, err = clientconfig.ConfigureWithResult(next, category, profileID, s.runtime.DataDirectory())
+		if clientconfig.IsManagedState(status.ConfigState) {
+			configResult, err = clientconfig.UpdateManagedWithResult(next, category, profileID, s.runtime.DataDirectory())
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}

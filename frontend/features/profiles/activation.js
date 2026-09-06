@@ -20,7 +20,8 @@ export function createProfileActivation({ loadState, categoryLabel }) {
 
   function clientIsConfigured(category) {
     const status = clientConfigFor(category);
-    return !status || status.status === "configured" || status.status === "unsupported";
+    return !status || status.status === "configured" || status.status === "unsupported" ||
+      status.configState === "managed" || status.configState === "managed_without_snapshot";
   }
 
   function renderDataDirectory() {
@@ -55,7 +56,11 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     try {
       // configureClient 只由用户确认或已明确接管的切换路径设置；跳过时
       // 传 false，后端不会触碰外部客户端文件。
-      await ActivateProfile(pending.profileId, pending.configureClient === true);
+      await ActivateProfile(
+        pending.profileId,
+        pending.configureClient === true,
+        pending.takeoverClient === true,
+      );
       await loadState();
       toast(`已切换到 ${clientCategoryLabel(pending.category)} 类别`);
     } catch (error) {
@@ -74,7 +79,8 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     let configured = clientIsConfigured(pending.category);
     try {
       const status = await CheckClientConfig(pending.category);
-      configured = !status || status.status === "configured" || status.status === "unsupported";
+      configured = !status || status.status === "configured" || status.status === "unsupported" ||
+        status.configState === "managed" || status.configState === "managed_without_snapshot";
       const cached = serverState.snapshot?.clientConfigs?.find((item) => item.category === pending.category);
       if (cached && status) Object.assign(cached, status);
     } catch (error) {
@@ -83,7 +89,7 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     }
     if (configured) {
       // 当前客户端已经由 CodexRelay 接管，切换 Profile 时同步模型等变更。
-      await performActivation({ ...pending, configureClient: true });
+      await performActivation({ ...pending, configureClient: true, takeoverClient: false });
       return;
     }
     openClientSetupModal(pending.category, pending);
@@ -113,7 +119,12 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     closeClientSetupModal();
     if (configure) setButtonLoading(button, true, "配置并启用中...");
     try {
-      await performActivation({ ...pending, configureClient: Boolean(configure), button: pending.button || (configure ? button : null) });
+      await performActivation({
+        ...pending,
+        configureClient: Boolean(configure),
+        takeoverClient: Boolean(configure),
+        button: pending.button || (configure ? button : null),
+      });
     } finally {
       if (configure) setButtonLoading(button, false);
     }

@@ -12,6 +12,7 @@ package desktop
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -464,7 +465,7 @@ func TestSuccessfulRequestClearsManualPromptAndNotifies(t *testing.T) {
 
 func TestSwitchDogeTokenUpdatesCodexClientConfiguration(t *testing.T) {
 	directory := t.TempDir()
-	codexDirectory := filepath.Join(directory, ".codex")
+	codexDirectory := t.TempDir()
 	store := config.NewStore(filepath.Join(directory, "config.json"))
 	cfg := config.Default(18765)
 	cfg.LocalAccessToken = "sk-local-relay"
@@ -530,6 +531,341 @@ func TestSwitchDogeTokenUpdatesCodexClientConfiguration(t *testing.T) {
 	prompt = service.GetState().Doge.TokenSwitch
 	if prompt == nil || prompt.Stopped || len(prompt.Candidates) != 1 || prompt.Candidates[0].ProfileID != "doge-profile" {
 		t.Fatalf("manual prompt should offer the previous token without automatic round state: %+v", prompt)
+	}
+}
+
+func TestActivateOfficialClearsSkippedRouteAndStaleSnapshotWithoutRewritingOAuth(t *testing.T) {
+	directory := t.TempDir()
+	codexDirectory := t.TempDir()
+	configPath := filepath.Join(codexDirectory, "config.toml")
+	authPath := filepath.Join(codexDirectory, "auth.json")
+	configData := []byte("model_provider = \"openai\"\nmodel = \"gpt-5\"\n")
+	authData := []byte("{\"auth_mode\":\"chatgpt\",\"tokens\":{\"account_id\":\"acct-test\",\"access_token\":\"oauth-placeholder\"}}\n")
+	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, authData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.Profiles = []config.Profile{{ID: "profile-a", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "A", BaseURL: "https://a.example/v1", APIKey: "sk-a"}}
+	cfg.ActiveProfiles = map[string]string{config.CategoryCodex: "profile-a"}
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{
+		ConfigDir: codexDirectory, ConfigFile: "config.toml", Mode: "relay",
+		OfficialBackups: []config.ClientConfigBackup{{Path: configPath, Existed: false, ExpectedSHA256: "stale-placeholder"}},
+	}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ActivateProfile("official:" + config.CategoryCodex); err != nil {
+		t.Fatal(err)
+	}
+	state := service.runtime.State().Config
+	if state.ActiveProfiles[config.CategoryCodex] != "" || state.ClientConfigs[config.CategoryCodex].Mode != "official" || len(state.ClientConfigs[config.CategoryCodex].OfficialBackups) != 0 {
+		t.Fatalf("official activation did not consume route and stale snapshot: active=%q client=%+v", state.ActiveProfiles[config.CategoryCodex], state.ClientConfigs[config.CategoryCodex])
+	}
+	currentConfig, configErr := os.ReadFile(configPath)
+	currentAuth, authErr := os.ReadFile(authPath)
+	if configErr != nil || authErr != nil || string(currentConfig) != string(configData) || string(currentAuth) != string(authData) {
+		t.Fatalf("current OAuth files were rewritten: configErr=%v authErr=%v config=%q auth=%q", configErr, authErr, currentConfig, currentAuth)
+	}
+}
+
+func TestActivateOfficialRejectsManagedCodexWithoutSnapshot(t *testing.T) {
+	directory := t.TempDir()
+	codexDirectory := t.TempDir()
+	configPath := filepath.Join(codexDirectory, "config.toml")
+	authPath := filepath.Join(codexDirectory, "auth.json")
+	configData := []byte("model_provider = \"codex_local_access\"\n\n[model_providers.codex_local_access]\nbase_url = \"http://127.0.0.1:9999/codex\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n")
+	authData := []byte("{\"OPENAI_API_KEY\":\"old-relay-token\"}\n")
+	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, authData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.Profiles = []config.Profile{{ID: "profile-a", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "A", BaseURL: "https://a.example/v1", APIKey: "sk-a"}}
+	cfg.ActiveProfiles = map[string]string{config.CategoryCodex: "profile-a"}
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: codexDirectory, ConfigFile: "config.toml", Mode: "relay"}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ActivateProfile("official:" + config.CategoryCodex); err == nil || !strings.Contains(err.Error(), "没有可恢复的官方快照") {
+		t.Fatalf("managed client without snapshot should reject official restore: %v", err)
+	}
+	if active := service.runtime.State().Config.ActiveProfiles[config.CategoryCodex]; active != "profile-a" {
+		t.Fatalf("failed restore changed active route: %q", active)
+	}
+	currentConfig, _ := os.ReadFile(configPath)
+	currentAuth, _ := os.ReadFile(authPath)
+	if string(currentConfig) != string(configData) || string(currentAuth) != string(authData) {
+		t.Fatal("failed restore changed managed files")
+	}
+}
+
+func TestActivateProfileSeparatesManagedUpdateFromExplicitTakeover(t *testing.T) {
+	directory := t.TempDir()
+	clientDirectory := t.TempDir()
+	configPath := filepath.Join(clientDirectory, "settings.json")
+	original := []byte("{\"env\":{\"OTHER\":\"external\"}}\n")
+	if err := os.WriteFile(configPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.LocalAccessToken = "sk-local-relay"
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{ConfigDir: clientDirectory, ConfigFile: "settings.json", Mode: "relay"}
+	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ActivateProfile("profile-b", true); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
+		t.Fatalf("ordinary managed switch should reject unknown content: %v", err)
+	}
+	current, err := os.ReadFile(configPath)
+	if err != nil || string(current) != string(original) {
+		t.Fatalf("rejected ordinary switch changed external content: error=%v data=%q", err, current)
+	}
+	if active := service.runtime.State().Config.ActiveProfiles[config.CategoryClaude]; active != "" {
+		t.Fatalf("rejected ordinary switch changed active profile: %q", active)
+	}
+
+	if err := service.ActivateProfile("profile-b", true, true); err != nil {
+		t.Fatal(err)
+	}
+	state := service.runtime.State().Config
+	if active := state.ActiveProfiles[config.CategoryClaude]; active != "profile-b" {
+		t.Fatalf("explicit takeover did not activate the profile: %q", active)
+	}
+	entry := state.ClientConfigs[config.CategoryClaude]
+	if entry.Mode != "relay" || len(entry.OfficialBackups) != 1 || !entry.OfficialBackups[0].Existed {
+		t.Fatalf("explicit takeover did not persist a fresh official snapshot: %+v", entry)
+	}
+}
+
+func TestRememberOfficialConfigKeepsLegacySnapshotWhenModeWasOfficial(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	original := config.ClientConfigBackup{
+		Path: path, BackupPath: filepath.Join("client-backups", config.CategoryClaude, "official.CodexRelay"),
+		BackupSHA256: "official-sha", Existed: true, Mode: 0o600, ExpectedSHA256: "previous-relay-sha",
+	}
+	cfg := config.Default(18765)
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{
+		ConfigDir: filepath.Dir(path), ConfigFile: "settings.json", Mode: "official",
+		OfficialBackups: []config.ClientConfigBackup{original},
+	}
+	result := clientconfig.ConfigureResult{
+		OfficialSnapshot: true,
+		Files:            []clientconfig.ConfigFileResult{{Path: path, Existed: true, Mode: 0o600, ExpectedSHA256: "next-relay-sha"}},
+	}
+	rememberOfficialConfig(&cfg, config.CategoryClaude, result)
+	entry := cfg.ClientConfigs[config.CategoryClaude]
+	if entry.Mode != "relay" || len(entry.OfficialBackups) != 1 {
+		t.Fatalf("legacy snapshot generation was replaced: %+v", entry)
+	}
+	backup := entry.OfficialBackups[0]
+	if backup.BackupPath != original.BackupPath || backup.BackupSHA256 != original.BackupSHA256 || backup.ExpectedSHA256 != "next-relay-sha" {
+		t.Fatalf("legacy official backup was not preserved while refreshing its fingerprint: %+v", backup)
+	}
+}
+
+func TestMissingManagedClientRebuildPreservesOfficialSnapshot(t *testing.T) {
+	clientDirectory := t.TempDir()
+	dataDirectory := t.TempDir()
+	path := filepath.Join(clientDirectory, "settings.json")
+	cfg := config.Default(18765)
+	cfg.LocalAccessToken = "new-local-token"
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{
+		ConfigDir: clientDirectory, ConfigFile: "settings.json", Mode: "relay",
+		OfficialBackups: []config.ClientConfigBackup{{Path: path, Existed: false, ExpectedSHA256: "previous-relay-sha"}},
+	}
+	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
+	result, err := clientconfig.UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.OfficialSnapshot || result.ResetOfficialSnapshot || len(result.Files) != 1 {
+		t.Fatalf("missing managed client did not reuse its official snapshot: %+v", result)
+	}
+	rememberOfficialConfig(&cfg, config.CategoryClaude, result)
+	entry := cfg.ClientConfigs[config.CategoryClaude]
+	if entry.Mode != "relay" || len(entry.OfficialBackups) != 1 || entry.OfficialBackups[0].Existed || entry.OfficialBackups[0].ExpectedSHA256 != result.Files[0].ExpectedSHA256 {
+		t.Fatalf("official snapshot was not preserved across rebuild: %+v", entry)
+	}
+}
+
+func TestActivateOfficialRestoresMissingManagedFile(t *testing.T) {
+	directory := t.TempDir()
+	clientDirectory := t.TempDir()
+	path := filepath.Join(clientDirectory, "settings.json")
+	official := []byte("{\"env\":{\"OTHER\":\"official\"}}\n")
+	if err := os.WriteFile(path, official, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.LocalAccessToken = "sk-local-relay"
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{ConfigDir: clientDirectory, ConfigFile: "settings.json"}
+	cfg.Profiles = []config.Profile{{ID: "profile-a", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "A", BaseURL: "https://a.example/v1", APIKey: "sk-a"}}
+	cfg.ActiveProfiles = map[string]string{config.CategoryClaude: "profile-a"}
+	configured, err := clientconfig.ConfigureWithResult(cfg, config.CategoryClaude, "profile-a", directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rememberOfficialConfig(&cfg, config.CategoryClaude, configured)
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ActivateProfile("official:" + config.CategoryClaude); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(path)
+	if err != nil || string(restored) != string(official) {
+		t.Fatalf("missing official file was not restored: error=%v data=%q", err, restored)
+	}
+	entry := service.runtime.State().Config.ClientConfigs[config.CategoryClaude]
+	if entry.Mode != "official" || len(entry.OfficialBackups) != 0 || service.runtime.State().Config.ActiveProfiles[config.CategoryClaude] != "" {
+		t.Fatalf("official activation did not consume managed state: %+v", entry)
+	}
+}
+
+func TestActivateOfficialRollbackRestoresMissingStateWhenPersistenceFails(t *testing.T) {
+	directory := t.TempDir()
+	clientDirectory := t.TempDir()
+	path := filepath.Join(clientDirectory, "settings.json")
+	official := []byte("{\"env\":{\"OTHER\":\"official\"}}\n")
+	if err := os.WriteFile(path, official, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(directory, "config.json")
+	store := config.NewStore(configPath)
+	cfg := config.Default(18765)
+	cfg.LocalAccessToken = "sk-local-relay"
+	cfg.ClientConfigs[config.CategoryClaude] = config.ClientConfig{ConfigDir: clientDirectory, ConfigFile: "settings.json"}
+	cfg.Profiles = []config.Profile{{ID: "profile-a", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "A", BaseURL: "https://a.example/v1", APIKey: "sk-a"}}
+	cfg.ActiveProfiles = map[string]string{config.CategoryClaude: "profile-a"}
+	configured, err := clientconfig.ConfigureWithResult(cfg, config.CategoryClaude, "profile-a", directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rememberOfficialConfig(&cfg, config.CategoryClaude, configured)
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(configPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ActivateProfile("official:" + config.CategoryClaude); err == nil {
+		t.Fatal("official activation should fail when config persistence fails")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed official activation did not restore the missing managed state: %v", err)
+	}
+	state := service.runtime.State().Config
+	entry := state.ClientConfigs[config.CategoryClaude]
+	if entry.Mode != "relay" || len(entry.OfficialBackups) != 1 || state.ActiveProfiles[config.CategoryClaude] != "profile-a" {
+		t.Fatalf("failed official activation changed persisted runtime state: active=%q entry=%+v", state.ActiveProfiles[config.CategoryClaude], entry)
+	}
+}
+
+func TestMissingGeminiFilesRebuildAndRestoreOfficialSnapshot(t *testing.T) {
+	clientDirectory := t.TempDir()
+	dataDirectory := t.TempDir()
+	envPath := filepath.Join(clientDirectory, ".env")
+	settingsPath := filepath.Join(clientDirectory, "settings.json")
+	officialEnv := []byte("GEMINI_API_KEY=official-key\nOTHER=keep\n")
+	officialSettings := []byte("{\"security\":{\"auth\":{\"selectedType\":\"oauth-personal\"}},\"theme\":\"dark\"}\n")
+	if err := os.WriteFile(envPath, officialEnv, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, officialSettings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default(18765)
+	cfg.LocalAccessToken = "new-local-token"
+	cfg.ClientConfigs[config.CategoryGemini] = config.ClientConfig{ConfigDir: clientDirectory, ConfigFile: ".env"}
+	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryGemini, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
+	initial, err := clientconfig.ConfigureWithResult(cfg, config.CategoryGemini, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rememberOfficialConfig(&cfg, config.CategoryGemini, initial)
+	if err := os.Remove(envPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(settingsPath); err != nil {
+		t.Fatal(err)
+	}
+	status, err := clientconfig.Inspect(cfg, config.CategoryGemini)
+	if err != nil || status.ConfigState != clientconfig.ClientConfigStateManaged {
+		t.Fatalf("missing managed Gemini state = %+v, error=%v", status, err)
+	}
+	rebuilt, err := clientconfig.UpdateManagedWithResult(cfg, config.CategoryGemini, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rebuilt.Files) != 2 {
+		t.Fatalf("managed Gemini rebuild did not recreate both original targets: %+v", rebuilt.Files)
+	}
+	rememberOfficialConfig(&cfg, config.CategoryGemini, rebuilt)
+	files, err := clientconfig.ResolveOfficialConfigFiles(cfg, config.CategoryGemini, dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := clientconfig.RestoreOfficialConfig(files); err != nil {
+		t.Fatal(err)
+	}
+	restoredEnv, envErr := os.ReadFile(envPath)
+	restoredSettings, settingsErr := os.ReadFile(settingsPath)
+	if envErr != nil || settingsErr != nil || string(restoredEnv) != string(officialEnv) || string(restoredSettings) != string(officialSettings) {
+		t.Fatalf("official Gemini roundtrip mismatch: envErr=%v settingsErr=%v env=%q settings=%q", envErr, settingsErr, restoredEnv, restoredSettings)
+	}
+}
+
+func TestConfigureDetectedClientsRequiresActiveProfile(t *testing.T) {
+	directory := t.TempDir()
+	codexDirectory := t.TempDir()
+	configPath := filepath.Join(codexDirectory, "config.toml")
+	authPath := filepath.Join(codexDirectory, "auth.json")
+	configData := []byte("model_provider = \"openai\"\n")
+	authData := []byte("{\"auth_mode\":\"chatgpt\",\"tokens\":{\"account_id\":\"acct-test\",\"access_token\":\"oauth-placeholder\"}}\n")
+	if err := os.WriteFile(configPath, configData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, authData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := config.NewStore(filepath.Join(directory, "config.json"))
+	cfg := config.Default(18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: codexDirectory, ConfigFile: "config.toml"}
+	if err := store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
+	if err := service.ConfigureDetectedClients(); err != nil {
+		t.Fatal(err)
+	}
+	currentConfig, _ := os.ReadFile(configPath)
+	currentAuth, _ := os.ReadFile(authPath)
+	if string(currentConfig) != string(configData) || string(currentAuth) != string(authData) {
+		t.Fatal("client was configured before the category had an active Profile")
 	}
 }
 

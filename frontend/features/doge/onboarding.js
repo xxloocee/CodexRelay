@@ -41,7 +41,7 @@ export function createDogeOnboarding({ loadState, openDogeCategoryDialog }) {
       let completionError = false;
       const detectedClients = (serverState.snapshot?.clientConfigs || [])
         .filter((client) => client.detected && client.status !== "unsupported" && !client.skipConfigReplacement
-          && (!client.requiresProfile || serverState.snapshot?.activeProfiles?.[client.category]));
+          && serverState.snapshot?.activeProfiles?.[client.category]);
       if (detectedClients.length) {
         const labels = detectedClients.map((client) => client.label).join("、");
         const accepted = await showConfirmDialog(

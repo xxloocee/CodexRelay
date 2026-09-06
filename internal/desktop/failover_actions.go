@@ -218,9 +218,9 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 		if status.Status == "error" {
 			return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 		}
-		if clientEntry.Mode == "relay" && len(clientEntry.OfficialBackups) > 0 {
+		if clientconfig.IsManagedState(status.ConfigState) {
 			var err error
-			configResult, err = clientconfig.ConfigureWithResult(effectiveConfig, category, candidate.ID, s.runtime.DataDirectory())
+			configResult, err = clientconfig.UpdateManagedWithResult(effectiveConfig, category, candidate.ID, s.runtime.DataDirectory())
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}

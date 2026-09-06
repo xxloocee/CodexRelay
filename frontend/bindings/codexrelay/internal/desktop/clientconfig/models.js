@@ -57,6 +57,13 @@ export class PublicClientConfig {
              */
             this["officialBackupAvailable"] = false;
         }
+        if (!("configState" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["configState"] = "";
+        }
         if (!("status" in $$source)) {
             /**
              * @member
