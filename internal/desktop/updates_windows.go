@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"codexrelay/internal/network"
@@ -26,8 +28,11 @@ import (
 )
 
 const (
-	updateRepository    = "xxloocee/CodexRelay"
-	updateChecksumAsset = "SHA256SUMS"
+	updateRepository     = "xxloocee/CodexRelay"
+	updateChecksumAsset  = "SHA256SUMS"
+	updateRestartEvent   = "relay-update-restart-error"
+	updateRestartDelay   = 500 * time.Millisecond
+	updateForceExitDelay = 20 * time.Second
 )
 
 func configureUpdater(app *application.App, relayRuntime *relay.Runtime) error {
@@ -36,7 +41,7 @@ func configureUpdater(app *application.App, relayRuntime *relay.Runtime) error {
 		updateChecksumAsset,
 		&http.Client{
 			Timeout:   15 * time.Minute,
-			Transport: updateRoundTripper{runtime: relayRuntime},
+			Transport: retryRoundTripper{base: &updateRoundTripper{runtime: relayRuntime}},
 		},
 	)
 	return app.Updater.Init(updater.Config{
@@ -47,20 +52,51 @@ func configureUpdater(app *application.App, relayRuntime *relay.Runtime) error {
 }
 
 type updateRoundTripper struct {
-	runtime *relay.Runtime
+	runtime   *relay.Runtime
+	mu        sync.Mutex
+	config    updateTransportConfig
+	transport *http.Transport
 }
 
-func (transport updateRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+type updateTransportConfig struct {
+	settings    network.Settings
+	systemProxy network.SystemProxyInfo
+	proxyPort   int
+}
+
+func (transport *updateRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	state := transport.runtime.State()
 	if state == nil {
 		return nil, errors.New("程序尚未初始化")
 	}
-	current, err := network.BuildTransport(state.Config.Network, network.DetectSystemProxy(), state.Config.ProxyPort)
-	if err != nil {
-		return nil, err
+	config := updateTransportConfig{
+		settings:    state.Config.Network,
+		systemProxy: network.DetectSystemProxy(),
+		proxyPort:   state.Config.ProxyPort,
 	}
-	defer current.CloseIdleConnections()
-	return current.RoundTrip(request)
+
+	transport.mu.Lock()
+	if transport.transport == nil || transport.config != config {
+		current, err := network.BuildTransport(config.settings, config.systemProxy, config.proxyPort)
+		if err != nil {
+			transport.mu.Unlock()
+			return nil, err
+		}
+		previous := transport.transport
+		transport.transport = current
+		transport.config = config
+		if previous != nil {
+			previous.CloseIdleConnections()
+		}
+	}
+	current := transport.transport
+	transport.mu.Unlock()
+
+	response, err := current.RoundTrip(request)
+	if err != nil && config.settings.Mode == "system" && config.systemProxy.PACURL != "" {
+		return nil, fmt.Errorf("连接 GitHub 失败；检测到 Windows PAC 自动代理，请在网络设置中改用手动代理: %w", err)
+	}
+	return response, err
 }
 
 func updatesSupported() bool { return true }
@@ -69,37 +105,83 @@ func updatesSupported() bool { return true }
 func (s *DesktopService) CheckForUpdate() (UpdateInfo, error) {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
+	if s.updateRestarting {
+		return UpdateInfo{Supported: true, CurrentVersion: applicationVersion}, errors.New("程序正在重启以完成更新")
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	return checkForUpdate(ctx)
 }
 
-// InstallUpdate 重新确认最新版本后下载并校验 EXE，再交给 Wails helper 原子替换并重启。
+// InstallUpdate 下载并校验 CheckForUpdate 已确认的 EXE。重启必须等本次 RPC 返回后单独触发。
 func (s *DesktopService) InstallUpdate() error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
+	if s.updateRestarting {
+		return errors.New("程序正在重启以完成更新")
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	defer cancel()
-	info, err := checkForUpdate(ctx)
-	if err != nil {
-		return err
-	}
-	if !info.Available {
-		return errors.New("当前已经是最新版本")
-	}
 	app := application.Get()
 	if app == nil || app.Updater == nil {
 		return errors.New("Windows 更新服务尚未初始化")
 	}
+	if app.Updater.State() != updater.StateAvailable {
+		return errors.New("更新信息已失效，请重新检查更新")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
 	if err := app.Updater.DownloadAndInstall(ctx); err != nil {
 		return fmt.Errorf("下载并校验更新失败: %w", err)
 	}
-	if err := app.Updater.Restart(context.Background()); err != nil {
-		return fmt.Errorf("启动更新替换程序失败: %w", err)
-	}
 	return nil
+}
+
+// RestartUpdate 在 RPC 返回后异步启动 helper，避免 Wails Quit 等待当前 RPC 而阻塞退出。
+func (s *DesktopService) RestartUpdate() error {
+	s.updateMu.Lock()
+	app := application.Get()
+	if app == nil || app.Updater == nil {
+		s.updateMu.Unlock()
+		return errors.New("Windows 更新服务尚未初始化")
+	}
+	if app.Updater.State() != updater.StateReady {
+		s.updateMu.Unlock()
+		return errors.New("更新文件尚未下载并校验完成")
+	}
+	if s.updateRestarting {
+		s.updateMu.Unlock()
+		return errors.New("程序正在重启以完成更新")
+	}
+	s.updateRestarting = true
+	s.updateMu.Unlock()
+
+	go s.restartUpdate(app)
+	return nil
+}
+
+func (s *DesktopService) restartUpdate(app *application.App) {
+	time.Sleep(updateRestartDelay)
+
+	// Wails helper 只等待父进程 30 秒；正常退出卡住时需留出替换和重启余量。
+	forceExit := time.AfterFunc(updateForceExitDelay, func() {
+		os.Exit(0)
+	})
+	if err := app.Updater.Restart(context.Background()); err != nil {
+		forceExit.Stop()
+		s.failUpdateRestart(app, fmt.Sprintf("启动更新替换程序失败: %v", err))
+	}
+}
+
+func (s *DesktopService) failUpdateRestart(app *application.App, message string) {
+	s.updateMu.Lock()
+	if !s.updateRestarting {
+		s.updateMu.Unlock()
+		return
+	}
+	s.updateRestarting = false
+	s.updateMu.Unlock()
+	app.Event.Emit(updateRestartEvent, message)
 }
 
 func checkForUpdate(ctx context.Context) (UpdateInfo, error) {

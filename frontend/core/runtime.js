@@ -68,7 +68,26 @@ export function mountRuntime({
       renderUpdateStatus();
     }),
     wails.Events.On("wails:updater:update-ready", () => {
-      runtimeState.update.phase = "更新已校验，正在重启";
+      runtimeState.update.phase = "更新文件已下载并校验";
+      renderUpdateStatus();
+    }),
+    wails.Events.On("wails:updater:error", (event) => {
+      const details = event?.data || event || {};
+      runtimeState.update.installing = false;
+      runtimeState.update.restarting = false;
+      runtimeState.update.ready = false;
+      runtimeState.update.available = false;
+      runtimeState.update.errorStage = details.stage === "check" ? "check" : "install";
+      runtimeState.update.error = details.message || "更新过程失败";
+      renderUpdateStatus();
+    }),
+    wails.Events.On("relay-update-restart-error", (event) => {
+      runtimeState.update.installing = false;
+      runtimeState.update.restarting = false;
+      runtimeState.update.ready = true;
+      runtimeState.update.available = true;
+      runtimeState.update.errorStage = "restart";
+      runtimeState.update.error = typeof event?.data === "string" ? event.data : "程序未能退出并完成更新";
       renderUpdateStatus();
     }),
   ];

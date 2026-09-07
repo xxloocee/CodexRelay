@@ -27,6 +27,7 @@ type SystemProxyInfo struct {
 	Bypass     string `json:"bypass,omitempty"`
 	Source     string `json:"source"`
 	Note       string `json:"note,omitempty"`
+	PACURL     string `json:"-"`
 }
 
 func Validate(settings Settings, listenerPort int) error {

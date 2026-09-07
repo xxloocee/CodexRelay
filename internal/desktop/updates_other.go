@@ -29,3 +29,7 @@ func (s *DesktopService) CheckForUpdate() (UpdateInfo, error) {
 func (s *DesktopService) InstallUpdate() error {
 	return errors.New("应用内更新当前仅支持 Windows")
 }
+
+func (s *DesktopService) RestartUpdate() error {
+	return errors.New("应用内更新当前仅支持 Windows")
+}

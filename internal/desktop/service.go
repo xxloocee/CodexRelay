@@ -22,7 +22,7 @@ import (
 	"codexrelay/internal/tasknotify"
 )
 
-var applicationVersion = "2.3.5"
+var applicationVersion = "2.3.6"
 
 const (
 	NotificationKindBalance      = "balance"
@@ -49,6 +49,7 @@ type DesktopService struct {
 	dogeSyncPhase            string
 	announcementSyncing      bool
 	dogeAlertsSuppressed     bool
+	updateRestarting         bool
 	switchMu                 sync.Mutex
 	switchPrompts            map[string]*tokenSwitchPromptState
 	switchRounds             map[string]*tokenSwitchRound

@@ -47,6 +47,7 @@ export const RedeemDoge = (...args) => callDesktop("RedeemDoge", ...args);
 export const ReorderDogeTokens = (...args) => callDesktop("ReorderDogeTokens", ...args);
 export const ReorderFailoverProfiles = (...args) => callDesktop("ReorderFailoverProfiles", ...args);
 export const ReorderProfiles = (...args) => callDesktop("ReorderProfiles", ...args);
+export const RestartUpdate = (...args) => callDesktop("RestartUpdate", ...args);
 export const SaveProfile = (...args) => callDesktop("SaveProfile", ...args);
 export const SelectDirectory = (...args) => callDesktop("SelectDirectory", ...args);
 export const SetClientConfigPath = (...args) => callDesktop("SetClientConfigPath", ...args);

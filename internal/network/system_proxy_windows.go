@@ -33,6 +33,7 @@ func DetectSystemProxy() SystemProxyInfo {
 	enabled, _, err := key.GetIntegerValue("ProxyEnable")
 	if err != nil || enabled == 0 {
 		if pac, _, pacErr := key.GetStringValue("AutoConfigURL"); pacErr == nil && strings.TrimSpace(pac) != "" {
+			info.PACURL = strings.TrimSpace(pac)
 			info.Note = "检测到 PAC 自动脚本；当前版本不解析 PAC，VPN/TUN 路由仍然有效"
 		} else {
 			info.Note = "系统 HTTP 代理未启用；VPN/TUN 路由仍然有效"

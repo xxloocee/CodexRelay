@@ -196,7 +196,7 @@ export function GetState() {
 }
 
 /**
- * InstallUpdate 重新确认最新版本后下载并校验 EXE，再交给 Wails helper 原子替换并重启。
+ * InstallUpdate 下载并校验 CheckForUpdate 已确认的 EXE。重启必须等本次 RPC 返回后单独触发。
  * @returns {$CancellablePromise<void>}
  */
 export function InstallUpdate() {
@@ -277,6 +277,14 @@ export function ReorderFailoverProfiles(category, ids) {
  */
 export function ReorderProfiles(ids) {
     return $Call.ByID(107731990, ids);
+}
+
+/**
+ * RestartUpdate 在 RPC 返回后异步启动 helper，避免 Wails Quit 等待当前 RPC 而阻塞退出。
+ * @returns {$CancellablePromise<void>}
+ */
+export function RestartUpdate() {
+    return $Call.ByID(294208145);
 }
 
 /**

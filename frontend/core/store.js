@@ -67,12 +67,15 @@ export const runtimeState = {
     checked: false,
     checking: false,
     installing: false,
+    restarting: false,
+    ready: false,
     available: false,
     latestVersion: "",
     phase: "",
     written: 0,
     total: 0,
     error: "",
+    errorStage: "",
   },
 };
 

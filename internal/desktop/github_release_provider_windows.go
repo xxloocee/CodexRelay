@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"golang.org/x/mod/semver"
@@ -77,10 +78,6 @@ func (p *gitHubReleaseProvider) Check(ctx context.Context, req updater.CheckRequ
 	if err != nil {
 		return nil, err
 	}
-	size, err := p.fetchArtifactSize(ctx, assetURL)
-	if err != nil {
-		return nil, err
-	}
 
 	return &updater.Release{
 		Version: version,
@@ -89,7 +86,6 @@ func (p *gitHubReleaseProvider) Check(ctx context.Context, req updater.CheckRequ
 		Artifact: updater.Artifact{
 			Filename: filename,
 			Filetype: "exe",
-			Size:     size,
 			Platform: "windows",
 			Arch:     arch,
 		},
@@ -173,27 +169,38 @@ func (p *gitHubReleaseProvider) latestTag(ctx context.Context) (string, error) {
 	if err != nil || tag == "" || strings.Contains(tag, "/") {
 		return "", fmt.Errorf("github-release: invalid tag in latest release URL %q", response.Request.URL.String())
 	}
+	_, _ = io.Copy(io.Discard, response.Body)
 	return tag, nil
 }
 
 func (p *gitHubReleaseProvider) fetchChecksum(ctx context.Context, checksumURL, filename string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Accept", "text/plain, application/octet-stream")
-	response, err := p.client.Do(request)
-	if err != nil {
-		return nil, fmt.Errorf("github-release: download checksum file: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("github-release: download checksum file: HTTP %d", response.StatusCode)
-	}
+	var contents []byte
+	for attempt := 1; attempt <= 2; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("Accept", "text/plain, application/octet-stream")
+		response, err := p.client.Do(request)
+		if err != nil {
+			return nil, fmt.Errorf("github-release: download checksum file: %w", err)
+		}
+		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			_ = response.Body.Close()
+			return nil, fmt.Errorf("github-release: download checksum file: HTTP %d", response.StatusCode)
+		}
 
-	contents, err := io.ReadAll(io.LimitReader(response.Body, maxChecksumFileSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("github-release: read checksum file: %w", err)
+		contents, err = io.ReadAll(io.LimitReader(response.Body, maxChecksumFileSize+1))
+		_ = response.Body.Close()
+		if err == nil {
+			break
+		}
+		if attempt == 2 {
+			return nil, fmt.Errorf("github-release: read checksum file: %w", err)
+		}
+		if err := waitForUpdateRetry(ctx, 500*time.Millisecond); err != nil {
+			return nil, err
+		}
 	}
 	if len(contents) > maxChecksumFileSize {
 		return nil, errors.New("github-release: checksum file is too large")
@@ -212,26 +219,6 @@ func (p *gitHubReleaseProvider) fetchChecksum(ctx context.Context, checksumURL, 
 	return nil, fmt.Errorf("github-release: checksum for %s is missing", filename)
 }
 
-func (p *gitHubReleaseProvider) fetchArtifactSize(ctx context.Context, assetURL string) (int64, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, assetURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	request.Header.Set("Accept", "application/octet-stream")
-	response, err := p.client.Do(request)
-	if err != nil {
-		return 0, fmt.Errorf("github-release: resolve release asset: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return 0, fmt.Errorf("github-release: release asset is unavailable: HTTP %d", response.StatusCode)
-	}
-	if response.ContentLength > 0 {
-		return response.ContentLength, nil
-	}
-	return 0, nil
-}
-
 func validSemver(version string) (string, error) {
 	normalized := strings.TrimSpace(version)
 	if !strings.HasPrefix(normalized, "v") {
@@ -241,6 +228,50 @@ func validSemver(version string) (string, error) {
 		return "", errors.New("version must use semantic versioning")
 	}
 	return normalized, nil
+}
+
+type retryRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (transport retryRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	const maxAttempts = 3
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		return transport.base.RoundTrip(request)
+	}
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		response, err := transport.base.RoundTrip(request.Clone(request.Context()))
+		if err == nil && !retryableUpdateStatus(response.StatusCode) {
+			return response, nil
+		}
+		if attempt == maxAttempts || request.Context().Err() != nil {
+			return response, err
+		}
+		if response != nil {
+			_, _ = io.CopyN(io.Discard, response.Body, 64*1024)
+			_ = response.Body.Close()
+		}
+		if err := waitForUpdateRetry(request.Context(), time.Duration(attempt)*500*time.Millisecond); err != nil {
+			return nil, err
+		}
+	}
+	return nil, errors.New("github-release: request retry exhausted")
+}
+
+func retryableUpdateStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+func waitForUpdateRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 type updateProgressWriter struct {
