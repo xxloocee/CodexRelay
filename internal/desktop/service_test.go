@@ -608,7 +608,7 @@ func TestActivateOfficialRejectsManagedCodexWithoutSnapshot(t *testing.T) {
 	}
 }
 
-func TestActivateProfileSeparatesManagedUpdateFromExplicitTakeover(t *testing.T) {
+func TestActivateProfileRepairsExternalChangesWithoutInventingOfficialSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	clientDirectory := t.TempDir()
 	configPath := filepath.Join(clientDirectory, "settings.json")
@@ -625,27 +625,22 @@ func TestActivateProfileSeparatesManagedUpdateFromExplicitTakeover(t *testing.T)
 		t.Fatal(err)
 	}
 	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
-	if err := service.ActivateProfile("profile-b", true); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
-		t.Fatalf("ordinary managed switch should reject unknown content: %v", err)
-	}
-	current, err := os.ReadFile(configPath)
-	if err != nil || string(current) != string(original) {
-		t.Fatalf("rejected ordinary switch changed external content: error=%v data=%q", err, current)
-	}
-	if active := service.runtime.State().Config.ActiveProfiles[config.CategoryClaude]; active != "" {
-		t.Fatalf("rejected ordinary switch changed active profile: %q", active)
-	}
-
-	if err := service.ActivateProfile("profile-b", true, true); err != nil {
-		t.Fatal(err)
-	}
-	state := service.runtime.State().Config
-	if active := state.ActiveProfiles[config.CategoryClaude]; active != "profile-b" {
-		t.Fatalf("explicit takeover did not activate the profile: %q", active)
-	}
-	entry := state.ClientConfigs[config.CategoryClaude]
-	if entry.Mode != "relay" || len(entry.OfficialBackups) != 1 || !entry.OfficialBackups[0].Existed {
-		t.Fatalf("explicit takeover did not persist a fresh official snapshot: %+v", entry)
+	for _, takeover := range []bool{false, true} {
+		if err := service.ActivateProfile("profile-b", true, takeover); err != nil {
+			t.Fatal(err)
+		}
+		current, err := os.ReadFile(configPath)
+		if err != nil || !strings.Contains(string(current), "sk-local-relay") || !strings.Contains(string(current), "external") {
+			t.Fatal("switch did not repair external configuration")
+		}
+		state := service.runtime.State().Config
+		if state.ActiveProfiles[config.CategoryClaude] != "profile-b" {
+			t.Fatal("switch did not activate profile")
+		}
+		entry := state.ClientConfigs[config.CategoryClaude]
+		if entry.Mode != "relay" || len(entry.OfficialBackups) != 0 {
+			t.Fatal("legacy managed state must not invent an official snapshot")
+		}
 	}
 }
 

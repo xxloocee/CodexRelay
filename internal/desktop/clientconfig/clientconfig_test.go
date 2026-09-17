@@ -298,7 +298,7 @@ func TestConfigureLegacyCodexWithoutSnapshotDoesNotCreateOfficialBackup(t *testi
 	}
 }
 
-func TestRelayModeDoesNotOverrideUnknownDiskConfiguration(t *testing.T) {
+func TestRelayModeAllowsRepairOfExternalConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "settings.json")
 	if err := os.WriteFile(path, []byte("{\"env\":{\"OTHER\":\"keep\"}}\n"), 0o600); err != nil {
@@ -309,8 +309,8 @@ func TestRelayModeDoesNotOverrideUnknownDiskConfiguration(t *testing.T) {
 		ConfigDir: directory, ConfigFile: "settings.json", Mode: "relay",
 	}
 	status := inspectClientConfig(cfg, clientDefinition{Category: config.CategoryClaude, Label: "Claude", File: "settings.json", Kind: "claude"})
-	if status.ConfigState != ClientConfigStateUnmanaged {
-		t.Fatalf("unknown disk configuration state = %q, want %q", status.ConfigState, ClientConfigStateUnmanaged)
+	if status.ConfigState != ClientConfigStateManagedWithoutSnapshot || status.Configured {
+		t.Fatalf("unknown disk configuration state = %q, want %q", status.ConfigState, ClientConfigStateManagedWithoutSnapshot)
 	}
 }
 
@@ -420,7 +420,7 @@ func TestConfigureMissingManagedClientWithoutSnapshotKeepsRestoreUnavailable(t *
 	}
 }
 
-func TestExplicitTakeoverReplacesStaleSnapshotForUnknownConfiguration(t *testing.T) {
+func TestExplicitTakeoverPreservesSnapshotForExternalConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	path := filepath.Join(directory, "settings.json")
@@ -439,19 +439,16 @@ func TestExplicitTakeoverReplacesStaleSnapshotForUnknownConfiguration(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.ResetOfficialSnapshot {
-		t.Fatal("explicit takeover of unknown content must replace stale snapshot metadata")
+	if result.ResetOfficialSnapshot || !result.OfficialSnapshot || len(result.Files) != 1 || result.Files[0].BackupPath != "" {
+		t.Fatalf("external edits must not replace the original official snapshot: %+v", result)
 	}
-	if len(result.Files) != 1 || result.Files[0].BackupPath == "" {
-		t.Fatalf("explicit takeover did not capture the current external configuration: %+v", result.Files)
-	}
-	backup, err := os.ReadFile(result.Files[0].BackupPath)
-	if err != nil || string(backup) != string(original) {
-		t.Fatalf("fresh official backup mismatch: error=%v data=%q", err, backup)
+	current, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(current), "new-local-token") || !strings.Contains(string(current), "external") {
+		t.Fatal("takeover did not apply Relay configuration while retaining unrelated settings")
 	}
 }
 
-func TestManagedUpdateRejectsUnknownConfigurationWithoutChangingIt(t *testing.T) {
+func TestManagedUpdateOverwritesExternalConfiguration(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	path := filepath.Join(directory, "settings.json")
@@ -466,12 +463,23 @@ func TestManagedUpdateRejectsUnknownConfigurationWithoutChangingIt(t *testing.T)
 		OfficialBackups: []config.ClientConfigBackup{{Path: path, Existed: false, ExpectedSHA256: "stale-placeholder"}},
 	}
 	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
-	if _, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
-		t.Fatalf("managed update should reject unknown content: %v", err)
+	result, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResetOfficialSnapshot || len(result.Files) != 1 || result.Files[0].BackupPath != "" {
+		t.Fatal("managed update replaced the official snapshot")
 	}
 	current, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(current), "new-local-token") || !strings.Contains(string(current), "external") {
+		t.Fatal("managed update did not restore Relay fields and retain unrelated fields")
+	}
+	if err := result.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	current, err = os.ReadFile(path)
 	if err != nil || string(current) != string(original) {
-		t.Fatalf("rejected managed update changed the client file: error=%v data=%q", err, current)
+		t.Fatal("rollback did not restore pre-operation external content")
 	}
 }
 
@@ -500,7 +508,7 @@ func TestManagedUpdateRejectsDuplicateOfficialBackupPaths(t *testing.T) {
 	}
 }
 
-func TestManagedUpdateRejectsConfigurationChangedAfterInspect(t *testing.T) {
+func TestManagedUpdateOverwritesConfigurationChangedAfterInspect(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	path := filepath.Join(directory, "settings.json")
@@ -523,16 +531,27 @@ func TestManagedUpdateRejectsConfigurationChangedAfterInspect(t *testing.T) {
 	if err := os.WriteFile(path, external, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
-		t.Fatalf("post-inspect external change should be rejected: %v", err)
+	result, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResetOfficialSnapshot || len(result.Files) != 1 || result.Files[0].BackupPath != "" {
+		t.Fatal("managed update replaced the official snapshot")
 	}
 	current, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(current), "new-local-token") || !strings.Contains(string(current), "changed-after-inspect") {
+		t.Fatal("managed update did not restore Relay fields and retain unrelated fields")
+	}
+	if err := result.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	current, err = os.ReadFile(path)
 	if err != nil || string(current) != string(external) {
-		t.Fatalf("post-inspect external change was overwritten: error=%v data=%q", err, current)
+		t.Fatal("rollback did not restore pre-operation external content")
 	}
 }
 
-func TestInspectAndManagedUpdateRejectFingerprintMismatchWithRelayStructure(t *testing.T) {
+func TestInspectAndManagedUpdateRepairFingerprintMismatchWithRelayStructure(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	path := filepath.Join(directory, "settings.json")
@@ -548,22 +567,19 @@ func TestInspectAndManagedUpdateRejectFingerprintMismatchWithRelayStructure(t *t
 	}
 	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryClaude, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
 	status := inspectClientConfig(cfg, clientDefinition{Category: config.CategoryClaude, Label: "Claude", File: "settings.json", Kind: "claude"})
-	if status.ConfigState != ClientConfigStateUnmanaged || status.Configured {
-		t.Fatalf("fingerprint mismatch must be exposed as unmanaged: %+v", status)
+	if status.ConfigState != ClientConfigStateManaged || status.Configured {
+		t.Fatalf("external edit must remain repairable: %+v", status)
 	}
-	if _, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
-		t.Fatalf("managed update should reject a structurally Relay-like fingerprint mismatch: %v", err)
-	}
-	current, err := os.ReadFile(path)
-	if err != nil || string(current) != string(relayData) {
-		t.Fatalf("rejected update changed external content: error=%v data=%q", err, current)
-	}
-	result, err := ConfigureWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory)
+	result, err := UpdateManagedWithResult(cfg, config.CategoryClaude, "profile-b", dataDirectory)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.ResetOfficialSnapshot || len(result.Files) != 1 || result.Files[0].BackupPath != "" {
-		t.Fatalf("confirmed Relay update replaced the original official baseline: %+v", result)
+		t.Fatalf("managed update replaced original official baseline: %+v", result)
+	}
+	current, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(current), "new-local-token") || strings.Contains(string(current), "externally-changed-token") {
+		t.Fatal("managed update did not replace external credentials")
 	}
 }
 
@@ -607,7 +623,7 @@ func TestManagedUpdateRebuildsMissingClientWithoutCreatingSnapshot(t *testing.T)
 	}
 }
 
-func TestManagedUpdateRejectsCodexOAuthRelayMixedState(t *testing.T) {
+func TestManagedUpdateRepairsCodexMixedStateWithoutOfficialSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	configPath := filepath.Join(directory, "config.toml")
@@ -624,15 +640,27 @@ func TestManagedUpdateRejectsCodexOAuthRelayMixedState(t *testing.T) {
 	cfg.LocalAccessToken = "new-local-token"
 	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: directory, ConfigFile: "config.toml", Mode: "relay"}
 	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
-	if _, err := UpdateManagedWithResult(cfg, config.CategoryCodex, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "拒绝自动覆盖") {
-		t.Fatalf("mixed OAuth/Relay state should be rejected: %v", err)
+	result, err := UpdateManagedWithResult(cfg, config.CategoryCodex, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := ConfigureWithResult(cfg, config.CategoryCodex, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "混合配置") {
-		t.Fatalf("explicit takeover must not snapshot a mixed Codex state: %v", err)
+	if result.OfficialSnapshot || result.ResetOfficialSnapshot {
+		t.Fatal("mixed state became an official snapshot")
 	}
 	currentAuth, err := os.ReadFile(authPath)
+	if err != nil || !strings.Contains(string(currentAuth), "new-local-token") || strings.Contains(string(currentAuth), "oauth-placeholder") {
+		t.Fatal("mixed authentication was not repaired")
+	}
+	if err := result.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	currentAuth, err = os.ReadFile(authPath)
 	if err != nil || string(currentAuth) != string(authData) {
-		t.Fatalf("mixed OAuth auth.json was overwritten: error=%v data=%q", err, currentAuth)
+		t.Fatal("rollback lost original OAuth data")
+	}
+	result, err = ConfigureWithResult(cfg, config.CategoryCodex, "profile-b", dataDirectory)
+	if err != nil || result.OfficialSnapshot {
+		t.Fatalf("explicit takeover should repair mixed state without inventing an official snapshot: %v", err)
 	}
 }
 
@@ -760,7 +788,7 @@ func TestInspectDoesNotLetOfficialModeHideRelayFingerprintConflict(t *testing.T)
 	}
 }
 
-func TestExplicitTakeoverRejectsPartialGeminiRelayState(t *testing.T) {
+func TestExplicitTakeoverRepairsPartialGeminiWithoutOfficialSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	dataDirectory := t.TempDir()
 	envPath := filepath.Join(directory, ".env")
@@ -777,12 +805,24 @@ func TestExplicitTakeoverRejectsPartialGeminiRelayState(t *testing.T) {
 	cfg.LocalAccessToken = "new-local-token"
 	cfg.ClientConfigs[config.CategoryGemini] = config.ClientConfig{ConfigDir: directory, ConfigFile: ".env", Mode: "relay"}
 	cfg.Profiles = []config.Profile{{ID: "profile-b", Source: config.SourceCustom, Category: config.CategoryGemini, Name: "B", BaseURL: "https://b.example/v1", APIKey: "sk-b"}}
-	if _, err := ConfigureWithResult(cfg, config.CategoryGemini, "profile-b", dataDirectory); err == nil || !strings.Contains(err.Error(), "混合配置") {
-		t.Fatalf("explicit takeover must not snapshot a partial Gemini state: %v", err)
+	result, err := ConfigureWithResult(cfg, config.CategoryGemini, "profile-b", dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OfficialSnapshot {
+		t.Fatal("partial Gemini state became an official snapshot")
 	}
 	currentEnv, envErr := os.ReadFile(envPath)
 	currentSettings, settingsErr := os.ReadFile(settingsPath)
+	if envErr != nil || settingsErr != nil || !strings.Contains(string(currentEnv), "new-local-token") || !strings.Contains(string(currentSettings), "gemini-api-key") {
+		t.Fatal("Gemini mixed authentication was not repaired")
+	}
+	if err := result.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	currentEnv, envErr = os.ReadFile(envPath)
+	currentSettings, settingsErr = os.ReadFile(settingsPath)
 	if envErr != nil || settingsErr != nil || string(currentEnv) != string(envData) || string(currentSettings) != string(settingsData) {
-		t.Fatalf("rejected takeover changed Gemini files: envErr=%v settingsErr=%v env=%q settings=%q", envErr, settingsErr, currentEnv, currentSettings)
+		t.Fatal("rollback did not restore mixed Gemini files")
 	}
 }
