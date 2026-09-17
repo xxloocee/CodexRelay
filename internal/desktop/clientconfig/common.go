@@ -423,11 +423,8 @@ type restoreTarget struct {
 func restoreConfigFilesTransaction(files []ConfigFileResult) (func() error, error) {
 	targets := make([]restoreTarget, 0, len(files))
 	for _, file := range files {
-		if err := verifyConfigFileResult(file); err != nil {
-			if _, statErr := os.Stat(file.Path); !errors.Is(statErr, os.ErrNotExist) {
-				return nil, err
-			}
-		}
+		// An explicit official switch overwrites external edits. Verify the
+		// backup itself below, and snapshot current contents for rollback.
 		target := restoreTarget{file: file}
 		if file.Existed {
 			data, err := os.ReadFile(file.BackupPath)

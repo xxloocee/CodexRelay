@@ -265,7 +265,12 @@ func inspectClientConfig(cfg config.AppConfig, definition clientDefinition) Publ
 			owned = false
 		}
 	}
-	if !owned && (relayOwned || partiallyRelayOwned) {
+	if entry.Mode == "relay" {
+		// Persisted takeover authorizes repairing later external edits on the
+		// main-window, tray and model-update paths. Native Codex OAuth was
+		// recognized above and remains a separate official state.
+		status.ConfigState = clientConfigState(entry, true, true)
+	} else if !owned && (relayOwned || partiallyRelayOwned) {
 		status.ConfigState = ClientConfigStateUnmanaged
 	} else {
 		status.ConfigState = clientConfigState(entry, true, owned)
@@ -665,7 +670,7 @@ func clientConfigurationMatches(definition clientDefinition, directory, file, en
 		var auth map[string]any
 		if len(authData) > 0 {
 			if err := json.Unmarshal(authData, &auth); err != nil {
-				return false, fmt.Errorf("解析 auth.json: %w", err)
+				return false, nil
 			}
 		}
 		// Codex's Responses API provider and local API-key auth are both Relay
@@ -748,12 +753,12 @@ func tomlTopLevelValue(raw, key string) string {
 		if strings.HasPrefix(strings.TrimSpace(line), "[") {
 			return ""
 		}
-		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") || strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
 			continue
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 && strings.TrimSpace(parts[0]) == key {
-			return tomlValue(parts[1])
+			return tomlValue(tomlLineContent(parts[1]))
 		}
 	}
 	return ""
@@ -762,7 +767,7 @@ func tomlTopLevelValue(raw, key string) string {
 func tomlSectionValue(raw, section, key string) string {
 	inSection := false
 	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
-		trimmed := strings.TrimSpace(line)
+		trimmed := tomlLineContent(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			inSection = strings.TrimSpace(strings.Trim(trimmed, "[]")) == section
 			continue
@@ -772,7 +777,7 @@ func tomlSectionValue(raw, section, key string) string {
 		}
 		parts := strings.SplitN(line, "=", 2)
 		if len(parts) == 2 && strings.TrimSpace(parts[0]) == key {
-			return tomlValue(parts[1])
+			return tomlValue(tomlLineContent(parts[1]))
 		}
 	}
 	return ""
@@ -937,6 +942,10 @@ func ValidateExternalClientDirectory(dataDirectory, clientDirectory string) erro
 	if runtime.GOOS == "windows" {
 		root = strings.ToLower(root)
 		target = strings.ToLower(target)
+		// Different drives (or UNC shares) cannot contain one another.
+		if filepath.VolumeName(root) != filepath.VolumeName(target) {
+			return nil
+		}
 	}
 	relative, err := filepath.Rel(root, target)
 	if err != nil {
@@ -1010,27 +1019,19 @@ func ResolveOfficialConfigFiles(cfg config.AppConfig, category, dataDirectory st
 	return resolved, nil
 }
 
-type configureIntent uint8
-
-const (
-	configureTakeover configureIntent = iota
-	configureManagedUpdate
-)
-
 // ConfigureWithResult explicitly takes over a client after user confirmation.
-// Unknown current content becomes the new official baseline.
+// It preserves an existing official baseline unless Codex has a fresh OAuth login.
 func ConfigureWithResult(cfg config.AppConfig, category, profileID, dataDirectory string) (ConfigureResult, error) {
-	return configureWithResult(cfg, category, profileID, dataDirectory, configureTakeover)
+	return configureWithResult(cfg, category, profileID, dataDirectory)
 }
 
-// UpdateManagedWithResult updates an existing Relay-owned client. It never
-// takes over unknown content and validates ownership from the transaction's
-// immutable pre-write snapshots.
+// UpdateManagedWithResult reapplies Relay configuration even after external
+// edits. Existing official snapshots remain the restore point.
 func UpdateManagedWithResult(cfg config.AppConfig, category, profileID, dataDirectory string) (ConfigureResult, error) {
-	return configureWithResult(cfg, category, profileID, dataDirectory, configureManagedUpdate)
+	return configureWithResult(cfg, category, profileID, dataDirectory)
 }
 
-func configureWithResult(cfg config.AppConfig, category, profileID, dataDirectory string, intent configureIntent) (ConfigureResult, error) {
+func configureWithResult(cfg config.AppConfig, category, profileID, dataDirectory string) (ConfigureResult, error) {
 	definition, ok := clientDefinitionFor(category)
 	if !ok || definition.Kind == "unsupported" {
 		return ConfigureResult{}, errors.New("该 API 类别暂不支持自动配置，请手动配置")
@@ -1072,7 +1073,6 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 	legacyCodexProviderID := ""
 	usePersistedOfficialSnapshot := false
 	validateSnapshots := func(snapshots map[string]configFileSnapshot) error {
-		detected := clientConfigurationDetectedSnapshots(snapshots)
 		var relayOwned bool
 		var err error
 		if len(entry.OfficialBackups) > 0 {
@@ -1098,31 +1098,16 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 			}
 		}
 
-		if intent == configureManagedUpdate {
-			if len(entry.OfficialBackups) == 0 {
-				managedWithoutSnapshot = relayOwned || (!detected && entry.Mode == "relay")
-				if !managedWithoutSnapshot {
-					return errors.New("当前客户端配置已不再由 CodexRelay 接管；已拒绝自动覆盖，请在主界面重新确认配置")
-				}
-				return nil
-			}
-			if !clientSnapshotsMatchExpectedOrMissing(snapshots, entry.OfficialBackups) || (!detected && entry.Mode != "relay") {
-				return errors.New("当前客户端配置已被其他工具修改；已拒绝自动覆盖，请在主界面重新确认配置")
-			}
-			usePersistedOfficialSnapshot = true
+		if len(entry.OfficialBackups) == 0 {
+			// Mixed or legacy Relay files are writable, but are not an official
+			// restore point. Never save Relay credentials as an official snapshot.
+			managedWithoutSnapshot = !codexCurrentlyOfficial &&
+				(relayOwned || partiallyRelayOwned || entry.Mode == "relay")
 		} else {
-			if partiallyRelayOwned && len(entry.OfficialBackups) == 0 {
-				return errors.New("检测到客户端配置仅部分由 CodexRelay 接管；已拒绝将混合配置保存为官方快照，请先在客户端恢复完整官方配置")
-			}
-			if len(entry.OfficialBackups) == 0 {
-				managedWithoutSnapshot = !codexCurrentlyOfficial &&
-					(relayOwned || (!detected && entry.Mode == "relay"))
-			} else {
-				usePersistedOfficialSnapshot = clientSnapshotsMatchExpectedOrMissing(snapshots, entry.OfficialBackups) ||
-					relayOwned || partiallyRelayOwned ||
-					(!detected && entry.Mode == "relay")
-				resetOfficialSnapshot = !usePersistedOfficialSnapshot
-			}
+			// Only a confirmed fresh Codex OAuth login replaces an old snapshot.
+			// Arbitrary external edits must not destroy the official restore point.
+			resetOfficialSnapshot = definition.Kind == "codex" && codexCurrentlyOfficial
+			usePersistedOfficialSnapshot = !resetOfficialSnapshot
 		}
 
 		if usePersistedOfficialSnapshot {

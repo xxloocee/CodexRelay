@@ -41,7 +41,7 @@ func upsertTomlProviderWithModel(raw, providerID, endpoint, defaultModel string)
 	header := "[model_providers." + providerID + "]"
 	start := -1
 	for i, line := range lines {
-		if strings.TrimSpace(line) == header {
+		if tomlLineContent(line) == header {
 			start = i
 			break
 		}
@@ -74,12 +74,9 @@ func upsertTomlTopLevelLine(lines []string, key, value string) []string {
 			firstSection = i
 			break
 		}
-		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
-			trimmed := strings.TrimSpace(line)
-			if tomlAssignmentKey(trimmed) == key {
-				lines[i] = key + " = " + value
-				return lines
-			}
+		if tomlAssignmentKey(line) == key {
+			lines[i] = key + " = " + value
+			return lines
 		}
 	}
 	lines = append(lines, "")
@@ -98,7 +95,7 @@ func removeTomlTopLevelLine(lines []string, key string) []string {
 	}
 	result := make([]string, 0, len(lines))
 	for i, line := range lines {
-		if i < firstSection && len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+		if i < firstSection {
 			trimmed := strings.TrimSpace(line)
 			if tomlAssignmentKey(trimmed) == key {
 				continue
@@ -137,6 +134,34 @@ func tomlAssignmentKey(line string) string {
 		return ""
 	}
 	return key
+}
+
+// tomlLineContent removes trailing comments without treating # inside a quoted
+// value as a comment. Used for single-line values and table headers.
+func tomlLineContent(line string) string {
+	var quote rune
+	escaped := false
+	for index, char := range line {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			if quote == '"' && char == '\\' {
+				escaped = true
+			} else if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch char {
+		case '"', '\'':
+			quote = char
+		case '#':
+			return strings.TrimSpace(line[:index])
+		}
+	}
+	return strings.TrimSpace(line)
 }
 
 func upsertTomlSectionValue(lines []string, sectionName, key, value string) []string {

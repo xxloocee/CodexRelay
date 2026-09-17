@@ -28,7 +28,9 @@ func codexOfficialConfigurationMatches(configData, authData []byte) (bool, error
 	}
 	var auth map[string]any
 	if err := json.Unmarshal(authData, &auth); err != nil {
-		return false, fmt.Errorf("解析 auth.json: %w", err)
+		// auth.json is rebuilt during takeover. Malformed external content is
+		// not an official login, but must not block that repair.
+		return false, nil
 	}
 	if stringField(auth, "auth_mode") != "chatgpt" {
 		return false, nil

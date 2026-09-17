@@ -7,9 +7,8 @@ import (
 )
 
 // rememberOfficialConfig keeps the first pre-relay backup for each file while
-// refreshing the fingerprint of the latest CodexRelay write. This lets an
-// explicit switch back to the official client configuration detect external
-// edits without replacing a newer user change silently. The first write also
+// refreshing the fingerprint of the latest CodexRelay write. Explicit official
+// restore may overwrite external edits without losing this baseline. The first write also
 // fixes the file set: later adapter versions or client-created files are not
 // silently promoted into the official snapshot.
 func rememberOfficialConfig(cfg *config.AppConfig, category string, result clientconfig.ConfigureResult) {

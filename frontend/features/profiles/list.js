@@ -92,7 +92,12 @@ export function createProfileList({
     const tags = [];
     if (!navigation.sourceFilter) tags.push({ text: "官方", tone: "source" });
     if (!navigation.categoryFilter) tags.push({ text: categoryLabel(category), tone: "category" });
-    const info = createProfileInfo({ name: `${client.label} 官方`, tags, note: "使用客户端原生官方配置", active });
+    const info = createProfileInfo({
+      name: category === "codex" ? "OpenAI官方" : `${client.label} 官方`,
+      tags,
+      note: category === "codex" ? "使用客户端原生官方配置，可保留账号登录态。" : "使用客户端原生官方配置",
+      active,
+    });
     const actions = document.createElement("div");
     actions.className = "profile-actions";
     const button = document.createElement("button");

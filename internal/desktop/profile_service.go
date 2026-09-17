@@ -405,8 +405,8 @@ const (
 )
 
 // ActivateProfile 启用指定 Profile。第二个参数控制是否同步外部客户端；
-// 第三个参数只由用户确认接管的弹窗传 true。普通切换即使磁盘状态在检查后
-// 发生变化，也只能走已接管更新，不能降级为隐式覆盖。
+// 第三个参数只由用户确认接管的弹窗传 true。同步配置会覆盖之前的外部修改，
+// 并保留官方快照；跳过配置时不会写入外部文件。
 // 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
 func (s *DesktopService) ActivateProfile(id string, configure ...bool) error {
 	if strings.HasPrefix(strings.TrimSpace(id), "official:") {
@@ -446,11 +446,11 @@ func (s *DesktopService) activateOfficial(category string) error {
 	if inspectErr != nil {
 		return fmt.Errorf("检查 %s 当前配置失败: %w", category, inspectErr)
 	}
-	if status.Status == "error" {
+	if status.Status == "error" && len(entry.OfficialBackups) == 0 {
 		return fmt.Errorf("检查 %s 当前配置失败: %s", category, status.Error)
 	}
 	var rollback func() error
-	if status.ConfigState == clientconfig.ClientConfigStateOfficial {
+	if status.Status != "error" && status.ConfigState == clientconfig.ClientConfigStateOfficial {
 		// Another tool may already have restored native OAuth while an older
 		// Relay snapshot remains. Consume only the stale metadata in that case.
 	} else if len(entry.OfficialBackups) > 0 {
@@ -462,8 +462,8 @@ func (s *DesktopService) activateOfficial(category string) error {
 		if err != nil {
 			return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
 		}
-	} else if status.ConfigState == clientconfig.ClientConfigStateManagedWithoutSnapshot {
-		return errors.New("当前客户端由 CodexRelay 接管，但没有可恢复的官方快照；请先在客户端中恢复官方登录或清理 Relay 配置")
+	} else if status.ConfigState != clientconfig.ClientConfigStateOfficial {
+		return errors.New("没有可恢复的官方快照，且当前文件未确认为官方配置；请先在客户端中恢复官方登录或清理 Relay 配置")
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		delete(cfg.ActiveProfiles, category)
