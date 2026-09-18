@@ -26,9 +26,21 @@ import (
 	"codexrelay/internal/storage"
 )
 
+// macOS's system temporary directory may be reached through /var -> /private/var.
+// Fixtures use its physical path, so history tests exercise their intended
+// behavior without weakening the production rejection of redirected paths.
+func physicalTestTempDir(t *testing.T) string {
+	t.Helper()
+	directory, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
 func TestHistoryRepairUsesActualProviderWithoutAuthGate(t *testing.T) {
 	t.Setenv("CODEX_SQLITE_HOME", "")
-	dir := t.TempDir()
+	dir := physicalTestTempDir(t)
 	cfg := isolatedClientDiscoveryConfig(t, 18765)
 	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir, Mode: "relay"}
 	// Default OpenAI remains valid with no config.toml and stale Relay metadata.
@@ -53,7 +65,7 @@ func TestHistoryRepairUsesActualProviderWithoutAuthGate(t *testing.T) {
 
 func TestHistoryRepairInterruptedRestoreAndLock(t *testing.T) {
 	t.Setenv("CODEX_SQLITE_HOME", "")
-	dir, dataDir := t.TempDir(), t.TempDir()
+	dir, dataDir := physicalTestTempDir(t), physicalTestTempDir(t)
 	cfg := isolatedClientDiscoveryConfig(t, 18765)
 	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir}
 	root := filepath.Join(dataDir, codexHistoryBackupDirectory, "interrupted")
@@ -127,7 +139,7 @@ func TestHistoryRepairInterruptedRestoreAndLock(t *testing.T) {
 
 func TestHistoryRepairRebuildsLocalCatalogAndRestores(t *testing.T) {
 	t.Setenv("CODEX_SQLITE_HOME", "")
-	dir, dataDir := t.TempDir(), t.TempDir()
+	dir, dataDir := physicalTestTempDir(t), physicalTestTempDir(t)
 	cfg := isolatedClientDiscoveryConfig(t, 18765)
 	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir}
 	db, err := sql.Open("sqlite", filepath.Join(dir, codexStateDatabaseFilename))
@@ -205,7 +217,7 @@ CREATE TABLE local_thread_catalog_metadata(id INTEGER PRIMARY KEY,catalog_revisi
 func isolatedClientDiscoveryConfig(t *testing.T, proxyPort int) config.AppConfig {
 	t.Helper()
 	cfg := config.Default(proxyPort)
-	root := t.TempDir()
+	root := physicalTestTempDir(t)
 	for _, definition := range clientDefinitions() {
 		if definition.Kind == "unsupported" {
 			continue
@@ -1206,7 +1218,7 @@ func TestCodexAllHistoryRepairOfficialRelayRoundTrip(t *testing.T) {
 	t.Setenv("CODEX_SQLITE_HOME", "")
 	cfg := isolatedClientDiscoveryConfig(t, 18765)
 	dir := cfg.ClientConfigs[config.CategoryCodex].ConfigDir
-	dataDir := t.TempDir()
+	dataDir := physicalTestTempDir(t)
 	stopped := func() error { return nil }
 	for _, name := range []string{"sessions", "archived_sessions"} {
 		if err := os.MkdirAll(filepath.Join(dir, name), 0700); err != nil {
@@ -1429,7 +1441,7 @@ func TestCodexHistoryPreviewBindsQueriedDatabaseCandidates(t *testing.T) {
 	ticket.digest = digest
 	repairTickets[preview.Token] = ticket
 	codexHistoryMigrationMu.Unlock()
-	if _, err := applyCodexHistoryRepair(cfg, t.TempDir(), "openai", preview.Token, func() error { return nil }); err == nil {
+	if _, err := applyCodexHistoryRepair(cfg, physicalTestTempDir(t), "openai", preview.Token, func() error { return nil }); err == nil {
 		t.Fatal("repair accepted IDs outside the previewed candidate set")
 	}
 	ids, err := codexHistoryDatabaseIDs(dbPath, "openai")
@@ -1478,7 +1490,7 @@ func TestCodexExplicitHistoryRepairRoundTripAndDrift(t *testing.T) {
 	if preview.FileCount != 1 || preview.ThreadCount != 1 {
 		t.Fatalf("wrong preview: %+v", preview)
 	}
-	dataDir := t.TempDir()
+	dataDir := physicalTestTempDir(t)
 	stopped := func() error { return nil }
 	if _, err := applyCodexHistoryRepair(cfg, dataDir, "openai", preview.Token, func() error { return errors.New("running") }); err == nil {
 		t.Fatal("running process allowed")

@@ -53,7 +53,9 @@ func TestManagerPromotesQuietTerminalEventAndVisitsConfiguredURL(t *testing.T) {
 	if err := os.WriteFile(rollout, []byte(initial), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	settings := Settings{Enabled: true, WebhookURL: server.URL, Events: EventSettings{TaskCompleted: true}, IdleGraceSeconds: 1, RequestTimeoutSeconds: 2}
+	// Drive the grace boundary with the fixture's mtime, not the assumption
+	// that a loaded CI runner can scan and persist its queue within one second.
+	settings := Settings{Enabled: true, WebhookURL: server.URL, Events: EventSettings{TaskCompleted: true}, IdleGraceSeconds: 3600, RequestTimeoutSeconds: 2}
 	manager := NewManager(func() Settings { return settings }, func() string { return dataDirectory }, nil)
 	manager.sessionsDirectory = func() (string, error) { return sessionsDirectory, nil }
 
@@ -72,7 +74,7 @@ func TestManagerPromotesQuietTerminalEventAndVisitsConfiguredURL(t *testing.T) {
 	if status := manager.Status(); status.Pending != 1 || status.Outbox != 0 {
 		t.Fatalf("quiet terminal status = %+v", status)
 	}
-	past := time.Now().Add(-2 * time.Second)
+	past := time.Now().Add(-2 * time.Hour)
 	if err := os.Chtimes(rollout, past, past); err != nil {
 		t.Fatal(err)
 	}
