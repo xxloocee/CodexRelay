@@ -138,8 +138,9 @@ func configureCodexNativeWithAuth(cfg config.AppConfig, backupRoot string, saved
 			}
 		}
 		value["model_provider"] = "openai"
-		value["cli_auth_credentials_store"] = "file"
-		if store == "keyring" || store == "auto" {
+		// The omitted store already defaults to file. Keep it omitted so an
+		// existing native login remains a byte-for-byte no-op.
+		if store == "file" || store == "keyring" || store == "auto" {
 			value["cli_auth_credentials_store"] = store
 		}
 		data, err := marshalCodexTOML(value)
