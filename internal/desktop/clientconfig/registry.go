@@ -256,7 +256,7 @@ func inspectClientConfig(cfg config.AppConfig, definition clientDefinition) Publ
 		status.Error = ownershipErr.Error()
 		return status
 	}
-	partiallyRelayOwned, ownershipErr := clientConfigurationPartiallyOwnedByRelaySnapshots(definition, entry, directory, file, snapshots)
+	partiallyRelayOwned, ownershipErr := clientConfigurationPartiallyOwnedByRelaySnapshots(definition, entry, directory, file, snapshots, cfg.LocalAccessToken)
 	if ownershipErr != nil {
 		status.Status = clientStatusError
 		status.StatusText = "配置读取失败"
@@ -357,7 +357,7 @@ func relayOwnershipConfirmed(definition clientDefinition, entry config.ClientCon
 	return true, nil
 }
 
-func clientConfigurationPartiallyOwnedByRelaySnapshots(definition clientDefinition, entry config.ClientConfig, directory, file string, snapshots map[string]configFileSnapshot) (bool, error) {
+func clientConfigurationPartiallyOwnedByRelaySnapshots(definition clientDefinition, entry config.ClientConfig, directory, file string, snapshots map[string]configFileSnapshot, localToken string) (bool, error) {
 	owned, err := clientConfigurationOwnedByRelaySnapshots(definition, directory, file, snapshots)
 	if err != nil || owned {
 		return false, err
@@ -376,7 +376,7 @@ func clientConfigurationPartiallyOwnedByRelaySnapshots(definition clientDefiniti
 		var auth map[string]any
 		authData := snapshots[filepath.Join(directory, "auth.json")].data
 		authOwned := len(authData) > 0 && json.Unmarshal(authData, &auth) == nil &&
-			len(auth) == 1 && strings.TrimSpace(stringField(auth, "OPENAI_API_KEY")) != ""
+			len(auth) == 1 && strings.TrimSpace(localToken) != "" && stringField(auth, "OPENAI_API_KEY") == strings.TrimSpace(localToken)
 		return configOwned || authOwned, nil
 	case "gemini":
 		if len(entry.OfficialBackups) == 0 && entry.Mode != "relay" {
@@ -975,13 +975,13 @@ func ValidateOfficialConfigFiles(cfg config.AppConfig, category string, files []
 		seen[path] = struct{}{}
 		backupPath := filepath.Clean(strings.TrimSpace(backup.BackupPath))
 		if backup.Existed {
-			if filepath.IsAbs(backupPath) || filepath.Dir(backupPath) != filepath.Join("client-backups", category) || !strings.HasSuffix(backupPath, ".CodexRelay") || backup.BackupSHA256 == "" {
+			if filepath.IsAbs(backupPath) || filepath.Dir(backupPath) != filepath.Join("client-backups", category) || !strings.HasSuffix(backupPath, ".CodexRelay") || (definition.Kind != "codex" && backup.BackupSHA256 == "") {
 				return errors.New("官方配置备份路径无效")
 			}
 		} else if strings.TrimSpace(backup.BackupPath) != "" || strings.TrimSpace(backup.BackupSHA256) != "" {
 			return errors.New("不存在的官方配置文件不能包含备份数据")
 		}
-		if strings.TrimSpace(backup.ExpectedSHA256) == "" {
+		if definition.Kind != "codex" && strings.TrimSpace(backup.ExpectedSHA256) == "" {
 			return errors.New("官方配置恢复指纹缺失")
 		}
 	}
@@ -1004,8 +1004,8 @@ func ResolveOfficialConfigFiles(cfg config.AppConfig, category, dataDirectory st
 	return resolved, nil
 }
 
-// ConfigureWithResult explicitly takes over a client after user confirmation.
-// It preserves an existing official baseline unless Codex has a fresh OAuth login.
+// ConfigureWithResult takes over a client after explicit selection. Codex uses
+// live files and records each newly selected external provider before takeover.
 func ConfigureWithResult(cfg config.AppConfig, category, profileID, dataDirectory string) (ConfigureResult, error) {
 	return configureWithResult(cfg, category, profileID, dataDirectory)
 }
@@ -1021,8 +1021,10 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 	if !ok || definition.Kind == "unsupported" {
 		return ConfigureResult{}, errors.New("该 API 类别暂不支持自动配置，请手动配置")
 	}
-	if err := ValidateClientConfigTargets(cfg.ClientConfigs); err != nil {
-		return ConfigureResult{}, err
+	if category != config.CategoryCodex {
+		if err := ValidateClientConfigTargets(cfg.ClientConfigs); err != nil {
+			return ConfigureResult{}, err
+		}
 	}
 	entry := cfg.ClientConfigs[category]
 	if err := config.ValidateClientConfig(category, entry); err != nil {
@@ -1051,11 +1053,12 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 	endpoint := clientProxyURL(cfg, category)
 	key := strings.TrimSpace(cfg.LocalAccessToken)
 	backupDirectory := ClientBackupDirectory(dataDirectory, category)
+	if definition.Kind == "codex" {
+		return configureCodexLive(file, endpoint, key, profile.DefaultModel, backupDirectory)
+	}
 	knownOfficialFiles := make(map[string]bool, len(cfg.ClientConfigs[category].OfficialBackups))
 	persistedOfficialData := make(map[string][]byte, len(cfg.ClientConfigs[category].OfficialBackups))
 	managedWithoutSnapshot := false
-	resetOfficialSnapshot := false
-	legacyCodexProviderID := ""
 	usePersistedOfficialSnapshot := false
 	validateSnapshots := func(snapshots map[string]configFileSnapshot) error {
 		var relayOwned bool
@@ -1068,31 +1071,17 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 		if err != nil {
 			return fmt.Errorf("检查现有客户端配置归属失败: %w", err)
 		}
-		partiallyRelayOwned, err := clientConfigurationPartiallyOwnedByRelaySnapshots(definition, entry, directory, file, snapshots)
+		partiallyRelayOwned, err := clientConfigurationPartiallyOwnedByRelaySnapshots(definition, entry, directory, file, snapshots, cfg.LocalAccessToken)
 		if err != nil {
 			return fmt.Errorf("检查现有客户端配置归属失败: %w", err)
-		}
-		codexCurrentlyOfficial := false
-		if definition.Kind == "codex" {
-			configData := snapshots[file].data
-			authData := snapshots[filepath.Join(directory, "auth.json")].data
-			legacyCodexProviderID = tomlTopLevelValue(string(configData), "model_provider")
-			codexCurrentlyOfficial, err = codexOfficialConfigurationMatches(configData, authData)
-			if err != nil {
-				return err
-			}
 		}
 
 		if len(entry.OfficialBackups) == 0 {
 			// Mixed or legacy Relay files are writable, but are not an official
 			// restore point. Never save Relay credentials as an official snapshot.
-			managedWithoutSnapshot = !codexCurrentlyOfficial &&
-				(relayOwned || partiallyRelayOwned || entry.Mode == "relay")
+			managedWithoutSnapshot = relayOwned || partiallyRelayOwned || entry.Mode == "relay"
 		} else {
-			// Only a confirmed fresh Codex OAuth login replaces an old snapshot.
-			// Arbitrary external edits must not destroy the official restore point.
-			resetOfficialSnapshot = definition.Kind == "codex" && codexCurrentlyOfficial
-			usePersistedOfficialSnapshot = !resetOfficialSnapshot
+			usePersistedOfficialSnapshot = true
 		}
 
 		if usePersistedOfficialSnapshot {
@@ -1164,10 +1153,6 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 		case "openclaw":
 			data, err := renderOpenClaw(renderSource(snapshots, file), endpoint, key, models, defaultModel)
 			return []ConfigFileChange{{Path: file, Data: data}}, err
-		case "codex":
-			authPath := filepath.Join(directory, "auth.json")
-			configData, authData, err := renderCodexData(file, renderSource(snapshots, file), renderSource(snapshots, authPath), endpoint, key, defaultModel)
-			return []ConfigFileChange{{Path: file, Data: configData}, {Path: authPath, Data: authData}}, err
 		case "grok":
 			data, err := renderGrok(renderSource(snapshots, file), endpoint, key, models, defaultModel)
 			return []ConfigFileChange{{Path: file, Data: data}}, err
@@ -1182,31 +1167,8 @@ func configureWithResult(cfg config.AppConfig, category, profileID, dataDirector
 		return result, err
 	}
 	result.OfficialSnapshot = !managedWithoutSnapshot
-	result.ResetOfficialSnapshot = resetOfficialSnapshot
 	configured, inspectErr := clientConfigurationMatches(definition, directory, file, endpoint, key, selectedModelID(models, defaultModel), models != nil)
 	if inspectErr == nil && configured {
-		if definition.Kind == "codex" {
-			historyRollback, migrationErr := migrateCodexHistoryProviderBucket(directory, dataDirectory, legacyCodexProviderID)
-			if migrationErr != nil {
-				configRollbackErr := error(nil)
-				if result.Rollback != nil {
-					configRollbackErr = result.Rollback()
-				}
-				if configRollbackErr != nil {
-					return result, fmt.Errorf("迁移 Codex 历史会话失败，请先关闭 Codex 后重试: %v；配置回退失败: %w", migrationErr, configRollbackErr)
-				}
-				return result, fmt.Errorf("迁移 Codex 历史会话失败，请先关闭 Codex 后重试: %w", migrationErr)
-			}
-			if historyRollback != nil {
-				configRollback := result.Rollback
-				result.Rollback = func() error {
-					if configRollback == nil {
-						return historyRollback()
-					}
-					return errors.Join(historyRollback(), configRollback())
-				}
-			}
-		}
 		return result, nil
 	}
 	rollbackErr := error(nil)

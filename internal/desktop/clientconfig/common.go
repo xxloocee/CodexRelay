@@ -87,6 +87,16 @@ func applyConfigTransactionWithBackupPolicy(paths []string, render func(map[stri
 // immutable snapshots used for rendering. The later unchanged check closes the
 // gap between ownership validation and commit.
 func applyConfigTransactionWithSnapshotPolicy(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), validate func(map[string]configFileSnapshot) error, shouldBackup func(string) bool, backupDirectory ...string) (ConfigureResult, error) {
+	return applyConfigTransactionPolicy(paths, render, validate, shouldBackup, false, backupDirectory...)
+}
+
+// Explicit Codex switches back up live files and write the selected channel.
+// Content/permission differences are not a switch prerequisite.
+func applyCodexConfigTransaction(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), backupDirectory ...string) (ConfigureResult, error) {
+	return applyConfigTransactionPolicy(paths, render, nil, nil, true, backupDirectory...)
+}
+
+func applyConfigTransactionPolicy(paths []string, render func(map[string]configFileSnapshot) ([]ConfigFileChange, error), validate func(map[string]configFileSnapshot) error, shouldBackup func(string) bool, force bool, backupDirectory ...string) (ConfigureResult, error) {
 	result := ConfigureResult{}
 	snapshots := make([]configFileSnapshot, 0, len(paths))
 	byPath := make(map[string]configFileSnapshot, len(paths))
@@ -190,7 +200,7 @@ func applyConfigTransactionWithSnapshotPolicy(paths []string, render func(map[st
 			}
 			current, readErr := os.ReadFile(snapshot.path)
 			info, statErr := os.Stat(snapshot.path)
-			if readErr != nil || statErr != nil || !bytes.Equal(current, expected.data) || info.Mode().Perm() != expected.mode.Perm() {
+			if readErr != nil || statErr != nil || !bytes.Equal(current, expected.data) || !clientFileModesEqual(info.Mode(), expected.mode) {
 				if rollbackErr == nil {
 					rollbackErr = fmt.Errorf("恢复 %s: 文件已被其他进程修改", filepath.Base(snapshot.path))
 				}
@@ -223,11 +233,16 @@ func applyConfigTransactionWithSnapshotPolicy(paths []string, render func(map[st
 
 	for _, change := range uniqueChanges {
 		snapshot := byPath[change.Path]
-		if err := ensureSnapshotUnchanged(snapshot); err != nil {
-			if rollbackErr := rollback(); rollbackErr != nil {
-				return result, &ConfigureTransactionError{Err: err, Result: result, RollbackErr: rollbackErr}
+		if !force {
+			if err := ensureSnapshotUnchanged(snapshot); err != nil {
+				if rollbackErr := rollback(); rollbackErr != nil {
+					return result, &ConfigureTransactionError{Err: err, Result: result, RollbackErr: rollbackErr}
+				}
+				return result, &ConfigureTransactionError{Err: err, Result: result}
 			}
-			return result, &ConfigureTransactionError{Err: err, Result: result}
+		}
+		if snapshot.existed && bytes.Equal(snapshot.data, change.Data) {
+			continue
 		}
 		if err := writeClientFileWithMode(change.Path, change.Data, snapshot.mode); err != nil {
 			if rollbackErr := rollback(); rollbackErr != nil {
@@ -241,7 +256,16 @@ func applyConfigTransactionWithSnapshotPolicy(paths []string, render func(map[st
 	// external client can rewrite an earlier file while a later file is being
 	// committed, leaving a partially managed configuration reported as success.
 	for _, change := range uniqueChanges {
-		expected := written[change.Path]
+		if force {
+			break
+		}
+		expected, changed := written[change.Path]
+		if !changed {
+			// A no-op file is still part of the non-Codex transaction. An
+			// external writer may change it while another file is committed.
+			snapshot := byPath[change.Path]
+			expected = writtenConfigFile{data: snapshot.data, mode: snapshot.mode}
+		}
 		if err := ensureWrittenConfigUnchanged(change.Path, expected.data, expected.mode); err != nil {
 			if rollbackErr := rollback(); rollbackErr != nil {
 				return result, &ConfigureTransactionError{Err: err, Result: result, RollbackErr: rollbackErr}
@@ -439,7 +463,9 @@ func restoreConfigFilesTransactionWithTransform(files []ConfigFileResult, transf
 			if err != nil {
 				return nil, fmt.Errorf("读取 %s 官方备份失败: %w", filepath.Base(file.Path), err)
 			}
-			if file.BackupSHA256 == "" || sha256Hex(data) != file.BackupSHA256 {
+			// Codex's transform consumes the current backup contents by user
+			// policy; historical digests must not prevent its restoration.
+			if transform == nil && (file.BackupSHA256 == "" || sha256Hex(data) != file.BackupSHA256) {
 				return nil, fmt.Errorf("%s 官方备份校验失败", filepath.Base(file.Path))
 			}
 			target.desired = data
@@ -525,7 +551,7 @@ func ensureRestoredConfigUnchanged(target restoreTarget) error {
 		return errors.New("当前文件已被其他进程修改")
 	}
 	mode := os.FileMode(target.file.Mode)
-	if mode != 0 && info.Mode().Perm() != mode.Perm() {
+	if mode != 0 && !clientFileModesEqual(info.Mode(), mode) {
 		return errors.New("当前文件权限已被其他进程修改")
 	}
 	return nil
@@ -587,7 +613,7 @@ func restoreCurrentConfigFile(target restoreTarget) error {
 	if desiredMode == 0 {
 		desiredMode = 0o600
 	}
-	if err != nil || statErr != nil || !bytes.Equal(current, target.desired) || info.Mode().Perm() != desiredMode.Perm() {
+	if err != nil || statErr != nil || !bytes.Equal(current, target.desired) || !clientFileModesEqual(info.Mode(), desiredMode) {
 		return errors.New("当前文件已被其他进程修改")
 	}
 	return writeClientFileRollback(target.file.Path, target.current, target.currentMode)
@@ -623,6 +649,10 @@ func ClientBackupDirectory(dataDirectory, category string) string {
 
 func backupClientData(path string, data []byte, backupDirectory ...string) (string, error) {
 	stamp := time.Now().Format("20060102-150405")
+	prefix := ""
+	if len(backupDirectory) > 1 {
+		prefix = backupDirectory[1]
+	}
 	if len(backupDirectory) == 0 || strings.TrimSpace(backupDirectory[0]) == "" {
 		// Preserve the historical helper API: callers that do not provide Relay's
 		// data directory keep backups beside the source file.
@@ -642,9 +672,9 @@ func backupClientData(path string, data []byte, backupDirectory ...string) (stri
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return "", fmt.Errorf("创建客户端备份目录: %w", err)
 	}
-	backup := filepath.Join(destination, fmt.Sprintf("%s.%s.CodexRelay", filepath.Base(path), stamp))
+	backup := filepath.Join(destination, fmt.Sprintf("%s%s.%s.CodexRelay", prefix, filepath.Base(path), stamp))
 	for index := 2; pathExists(backup); index++ {
-		backup = filepath.Join(destination, fmt.Sprintf("%s.%s-%d.CodexRelay", filepath.Base(path), stamp, index))
+		backup = filepath.Join(destination, fmt.Sprintf("%s%s.%s-%d.CodexRelay", prefix, filepath.Base(path), stamp, index))
 	}
 	if err := storage.WriteBytesAtomic(backup, ".codexrelay-backup-*.tmp", data, 0o600); err != nil {
 		return "", fmt.Errorf("创建 %s 备份: %w", filepath.Base(path), err)

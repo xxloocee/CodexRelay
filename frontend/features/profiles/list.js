@@ -71,7 +71,7 @@ export function createProfileList({
     const official = !active && configState === "official";
     // A managed legacy file without a pre-Relay snapshot can switch between
     // Profiles, but there are no official bytes that can be restored safely.
-    const unavailable = configState === "managed_without_snapshot";
+    const unavailable = client.category !== "codex" && configState === "managed_without_snapshot";
     return {
       current: !active && official,
       backupAvailable,

@@ -574,7 +574,7 @@ func TestActivateOfficialClearsSkippedRouteAndStaleSnapshotWithoutRewritingOAuth
 	}
 }
 
-func TestActivateOfficialRejectsManagedCodexWithoutSnapshot(t *testing.T) {
+func TestActivateOfficialRebuildsNativeCodexWithoutSnapshot(t *testing.T) {
 	directory := t.TempDir()
 	codexDirectory := t.TempDir()
 	configPath := filepath.Join(codexDirectory, "config.toml")
@@ -596,16 +596,26 @@ func TestActivateOfficialRejectsManagedCodexWithoutSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := NewDesktopService(newTestRuntime(t, directory, store, cfg))
-	if err := service.ActivateProfile("official:" + config.CategoryCodex); err == nil || !strings.Contains(err.Error(), "没有可恢复的官方快照") {
-		t.Fatalf("managed client without snapshot should reject official restore: %v", err)
+	if err := service.ActivateProfile("official:" + config.CategoryCodex); err != nil {
+		t.Fatalf("missing snapshot must not block native configuration: %v", err)
 	}
-	if active := service.runtime.State().Config.ActiveProfiles[config.CategoryCodex]; active != "profile-a" {
-		t.Fatalf("failed restore changed active route: %q", active)
+	if active := service.runtime.State().Config.ActiveProfiles[config.CategoryCodex]; active != "" {
+		t.Fatalf("native configuration retained Relay route: %q", active)
 	}
 	currentConfig, _ := os.ReadFile(configPath)
 	currentAuth, _ := os.ReadFile(authPath)
-	if string(currentConfig) != string(configData) || string(currentAuth) != string(authData) {
-		t.Fatal("failed restore changed managed files")
+	if !strings.Contains(string(currentConfig), `model_provider = "openai"`) || strings.TrimSpace(string(currentAuth)) != "{}" {
+		t.Fatal("native configuration must request login without reusing the Relay key")
+	}
+	for name, original := range map[string][]byte{"config.toml": configData, "auth.json": authData} {
+		files, err := filepath.Glob(filepath.Join(directory, "client-backups", "codex", "provider-codex_local_access--"+name+".*.CodexRelay"))
+		if err != nil || len(files) != 1 {
+			t.Fatalf("missing provider-labelled backup for %s", name)
+		}
+		data, err := os.ReadFile(files[0])
+		if err != nil || string(data) != string(original) {
+			t.Fatalf("backup did not retain original %s", name)
+		}
 	}
 }
 

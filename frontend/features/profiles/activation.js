@@ -54,8 +54,8 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     const button = pending?.button || null;
     setButtonLoading(button, true, "切换中...");
     try {
-      // configureClient 只由用户确认或已明确接管的切换路径设置；跳过时
-      // 传 false，后端不会触碰外部客户端文件。
+      // Codex 点击即配置；其他客户端使用确认标记。用户开启
+      // skipConfigReplacement 时，后端只切换上游。
       await ActivateProfile(
         pending.profileId,
         pending.configureClient === true,
@@ -74,6 +74,10 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     const client = clientConfigFor(pending.category);
     if (client?.skipConfigReplacement) {
       await performActivation({ ...pending, configureClient: false });
+      return;
+    }
+    if (pending.category === "codex") {
+      await performActivation({ ...pending, configureClient: true, takeoverClient: true });
       return;
     }
     let configured = clientIsConfigured(pending.category);

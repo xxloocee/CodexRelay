@@ -136,7 +136,7 @@ func TestCodexOAuthAPIRoundTripPreservesLogin(t *testing.T) {
 	}
 }
 
-// The original backup may contain stale providers, but a restored account must not.
+// Native selection may retain inactive providers, but must use built-in OpenAI.
 func codexOfficialRoundTripMatches(t *testing.T, configText, authText, originalAuth string) bool {
 	t.Helper()
 	var cfg map[string]any
@@ -151,5 +151,6 @@ func codexOfficialRoundTripMatches(t *testing.T, configText, authText, originalA
 		t.Fatal(err)
 	}
 	delete(expected, "OPENAI_API_KEY")
-	return cfg["model_provider"] == "openai" && cfg["model"] == "gpt-5" && cfg["model_providers"] == nil && reflect.DeepEqual(auth, expected)
+	providers, _ := cfg["model_providers"].(map[string]any)
+	return cfg["model_provider"] == "openai" && cfg["model"] == "gpt-5" && providers["openai"] == nil && reflect.DeepEqual(auth, expected)
 }

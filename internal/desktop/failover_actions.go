@@ -210,9 +210,15 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 	clientEntry := state.Config.ClientConfigs[category]
 	var configResult clientconfig.ConfigureResult
 	clientConfigRendered := false
-	// 自动故障切换只能更新已经明确由 CodexRelay 接管的文件；未接管的
-	// 客户端必须等待用户在切换提示中确认，避免后台任务擅自接管外部配置。
-	if clientconfig.Supports(category) && !clientEntry.SkipConfigReplacement {
+	// Codex 故障切换统一写入请求通道；其他客户端保留已有接管规则。
+	if category == config.CategoryCodex && !clientEntry.SkipConfigReplacement {
+		var writeErr error
+		configResult, writeErr = clientconfig.UpdateManagedWithResult(effectiveConfig, category, candidate.ID, s.runtime.DataDirectory())
+		if writeErr != nil {
+			return fmt.Errorf("更新客户端配置失败: %w", writeErr)
+		}
+		clientConfigRendered = true
+	} else if clientconfig.Supports(category) && !clientEntry.SkipConfigReplacement {
 		status, inspectErr := clientconfig.Inspect(state.Config, category)
 		if inspectErr != nil {
 			return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
@@ -227,11 +233,6 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
 			clientConfigRendered = true
-		}
-	}
-	if category == config.CategoryCodex && !clientConfigRendered {
-		if err := clientconfig.RequireCodexRelayConfiguration(effectiveConfig); err != nil {
-			return err
 		}
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {

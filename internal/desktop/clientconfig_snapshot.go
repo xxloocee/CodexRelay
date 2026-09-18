@@ -30,9 +30,8 @@ func rememberOfficialConfig(cfg *config.AppConfig, category string, result clien
 		return
 	}
 	if result.ResetOfficialSnapshot {
-		// A third-party switcher may have changed the official files after the
-		// previous Relay takeover. The successful re-takeover above captured a
-		// fresh baseline, so discard metadata for the older generation.
+		// Codex just backed up a live external provider. Point at this fresh
+		// paired snapshot; older provider-labelled backups remain on disk.
 		entry.OfficialBackups = nil
 	}
 	byPath := make(map[string]int, len(entry.OfficialBackups))

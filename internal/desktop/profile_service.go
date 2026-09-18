@@ -204,13 +204,13 @@ func (s *DesktopService) saveProfile(input ProfileInput, modelsOmitted bool) err
 			entry := state.Config.ClientConfigs[prospective.Category]
 			if !entry.SkipConfigReplacement {
 				status, inspectErr := clientconfig.Inspect(state.Config, prospective.Category)
-				if inspectErr != nil {
+				if inspectErr != nil && prospective.Category != config.CategoryCodex {
 					return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
 				}
-				if status.Status == "error" {
+				if status.Status == "error" && prospective.Category != config.CategoryCodex {
 					return fmt.Errorf("检查客户端配置失败: %s", status.Error)
 				}
-				if clientconfig.IsManagedState(status.ConfigState) {
+				if prospective.Category == config.CategoryCodex || clientconfig.IsManagedState(status.ConfigState) {
 					configResult, err = clientconfig.UpdateManagedWithResult(next, prospective.Category, prospective.ID, s.runtime.DataDirectory())
 					if err != nil {
 						return fmt.Errorf("更新客户端配置失败: %w", err)
@@ -404,7 +404,8 @@ const (
 	clientConfigWriteTakeover
 )
 
-// ActivateProfile 启用指定 Profile。第二个参数控制是否同步外部客户端；
+// ActivateProfile 启用指定 Profile。Codex 默认同步，显式跳过除外。
+// 其他客户端由第二个参数控制是否同步外部客户端；
 // 第三个参数只由用户确认接管的弹窗传 true。同步配置会覆盖之前的外部修改，
 // 并保留官方快照；跳过配置时不会写入外部文件。
 // 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
@@ -424,8 +425,8 @@ func (s *DesktopService) ActivateProfile(id string, configure ...bool) error {
 	return s.activateProfile(id, writeIntent)
 }
 
-// activateOfficial restores the client files captured before CodexRelay took
-// over this category, then removes the relay Profile mapping.
+// activateOfficial selects native OpenAI for Codex; other clients restore their
+// original files. The relay Profile mapping is removed after the write.
 func (s *DesktopService) activateOfficial(category string) (outcome error) {
 	category = strings.TrimSpace(category)
 	if !config.IsCategory(category) {
@@ -444,39 +445,35 @@ func (s *DesktopService) activateOfficial(category string) (outcome error) {
 	}
 	entry := state.Config.ClientConfigs[category]
 	previousID := strings.TrimSpace(state.Config.ActiveProfiles[category])
-	status, inspectErr := clientconfig.Inspect(state.Config, category)
-	if inspectErr != nil {
-		return fmt.Errorf("检查 %s 当前配置失败: %w", category, inspectErr)
-	}
-	if status.Status == "error" && len(entry.OfficialBackups) == 0 {
-		return fmt.Errorf("检查 %s 当前配置失败: %s", category, status.Error)
-	}
 	var rollback func() error
-	if status.Status != "error" && status.ConfigState == clientconfig.ClientConfigStateOfficial {
-		// Another tool may already have restored native OAuth while an older
-		// Relay snapshot remains. Keep that login and normalize stale connections.
-		if category == config.CategoryCodex {
-			var err error
-			rollback, err = clientconfig.NormalizeCodexOfficialWithRollback(state.Config)
+	if category == config.CategoryCodex {
+		var err error
+		rollback, err = clientconfig.SwitchCodexOfficialWithRollback(state.Config, s.runtime.DataDirectory())
+		if err != nil {
+			return fmt.Errorf("切换 Codex 官方配置失败: %w", err)
+		}
+	} else {
+		status, inspectErr := clientconfig.Inspect(state.Config, category)
+		if inspectErr != nil {
+			return fmt.Errorf("检查 %s 当前配置失败: %w", category, inspectErr)
+		}
+		if status.Status == "error" && len(entry.OfficialBackups) == 0 {
+			return fmt.Errorf("检查 %s 当前配置失败: %s", category, status.Error)
+		}
+		if status.Status != "error" && status.ConfigState == clientconfig.ClientConfigStateOfficial {
+			// Already using this client's native configuration.
+		} else if len(entry.OfficialBackups) > 0 {
+			files, err := clientconfig.ResolveOfficialConfigFiles(state.Config, category, s.runtime.DataDirectory())
 			if err != nil {
-				return fmt.Errorf("整理 Codex 官方配置失败: %w", err)
+				return fmt.Errorf("官方配置恢复信息无效: %w", err)
 			}
-		}
-	} else if len(entry.OfficialBackups) > 0 {
-		files, err := clientconfig.ResolveOfficialConfigFiles(state.Config, category, s.runtime.DataDirectory())
-		if err != nil {
-			return fmt.Errorf("官方配置恢复信息无效: %w", err)
-		}
-		if category == config.CategoryCodex {
-			rollback, err = clientconfig.RestoreCodexOfficialConfigWithRollback(files)
-		} else {
 			rollback, err = clientconfig.RestoreOfficialConfigWithRollback(files)
+			if err != nil {
+				return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
+			}
+		} else if status.ConfigState != clientconfig.ClientConfigStateOfficial {
+			return errors.New("没有可恢复的官方快照，且当前文件未确认为官方配置；请先在客户端中恢复官方登录或清理 Relay 配置")
 		}
-		if err != nil {
-			return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
-		}
-	} else if status.ConfigState != clientconfig.ClientConfigStateOfficial {
-		return errors.New("没有可恢复的官方快照，且当前文件未确认为官方配置；请先在客户端中恢复官方登录或清理 Relay 配置")
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		delete(cfg.ActiveProfiles, category)
@@ -515,8 +512,7 @@ func (s *DesktopService) activateOfficial(category string) (outcome error) {
 	return nil
 }
 
-// activateProfileFromTray 只同步已经由 CodexRelay 接管的客户端。托盘点击是
-// Profile 切换操作，不等同于用户确认覆盖一个尚未接管的外部配置。
+// activateProfileFromTray 对 Codex 直接写入；其他客户端只同步已接管配置。
 func (s *DesktopService) activateProfileFromTray(id string) error {
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
@@ -532,6 +528,9 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 	entry := state.Config.ClientConfigs[category]
 	writeIntent := clientConfigWriteNone
 	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
+		if category == config.CategoryCodex {
+			return s.activateProfile(id, clientConfigWriteManaged)
+		}
 		status, err := clientconfig.Inspect(state.Config, category)
 		if err != nil {
 			return fmt.Errorf("检查客户端配置失败: %w", err)
@@ -567,7 +566,7 @@ func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWrit
 	var configResult clientconfig.ConfigureResult
 	clientConfigRendered := false
 	var err error
-	if writeIntent != clientConfigWriteNone && clientconfig.Supports(category) && !state.Config.ClientConfigs[category].SkipConfigReplacement {
+	if (category == config.CategoryCodex || writeIntent != clientConfigWriteNone) && clientconfig.Supports(category) && !state.Config.ClientConfigs[category].SkipConfigReplacement {
 		if writeIntent == clientConfigWriteTakeover {
 			configResult, err = clientconfig.ConfigureWithResult(state.Config, category, id, s.runtime.DataDirectory())
 		} else {
@@ -602,11 +601,6 @@ func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWrit
 				}
 				if !found {
 					return errors.New("二狗子令牌已不在最新目录中，请先同步")
-				}
-			}
-			if category == config.CategoryCodex && !clientConfigRendered {
-				if err := clientconfig.RequireCodexRelayConfiguration(*cfg); err != nil {
-					return err
 				}
 			}
 			if cfg.ActiveProfiles == nil {

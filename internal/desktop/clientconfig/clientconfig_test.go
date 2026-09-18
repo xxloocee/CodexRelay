@@ -475,8 +475,12 @@ func TestConfigureLegacyCodexWithoutSnapshotDoesNotCreateOfficialBackup(t *testi
 		t.Fatal("legacy Relay content must not become an official snapshot")
 	}
 	for _, file := range result.Files {
-		if file.BackupPath != "" {
-			t.Fatalf("legacy Relay file was backed up as official: %+v", file)
+		if file.BackupPath == "" {
+			t.Fatal("legacy Relay file has no recovery copy")
+		}
+		data, err := os.ReadFile(file.BackupPath)
+		if err != nil || sha256Hex(data) != file.BackupSHA256 {
+			t.Fatal("legacy Relay recovery copy does not match the preimage")
 		}
 	}
 	configData, err := os.ReadFile(configPath)
@@ -1022,7 +1026,7 @@ func TestExplicitTakeoverRepairsPartialGeminiWithoutOfficialSnapshot(t *testing.
 	}
 }
 
-func TestCodexConnectionIsExclusiveAcrossProfiles(t *testing.T) {
+func TestCodexConnectionChangesOnlyActiveProfile(t *testing.T) {
 	source := []byte(`"model_provider" = "openai"
 profile = "official"
 cli_auth_credentials_store = "keyring"
@@ -1056,15 +1060,16 @@ command = "keep-me"
 		t.Fatal(err)
 	}
 	providers := value["model_providers"].(map[string]any)
-	if len(providers) != 1 || providers["codexrelay"] == nil || value["model_provider"] != "codexrelay" {
-		t.Fatal("multiple providers survived")
+	if providers["old"] == nil || providers["codexrelay"] == nil || value["model_provider"] != "codexrelay" {
+		t.Fatal("active provider not selected or inactive provider lost")
 	}
 	profiles := value["profiles"].(map[string]any)
-	for _, raw := range profiles {
-		profile := raw.(map[string]any)
-		if profile["model_provider"] != nil || profile["cli_auth_credentials_store"] != nil || profile["model"] != nil {
-			t.Fatal("profile can override connection")
-		}
+	active := profiles["official"].(map[string]any)
+	if active["model_provider"] != nil || active["cli_auth_credentials_store"] != nil || active["model"] != nil {
+		t.Fatal("active profile can override target connection/model")
+	}
+	if profiles["other"].(map[string]any)["model_provider"] != "old" {
+		t.Fatal("inactive profile changed")
 	}
 	if profiles["official"].(map[string]any)["model_reasoning_effort"] != "high" || value["mcp_servers"].(map[string]any)["example"].(map[string]any)["command"] != "keep-me" {
 		t.Fatal("unrelated settings lost")
@@ -1072,7 +1077,7 @@ command = "keep-me"
 	if ok, err := codexRelayConfigurationMatches(data, auth, endpoint, key, "new-model", false); err != nil || !ok {
 		t.Fatalf("valid connection rejected: %v", err)
 	}
-	for _, field := range []string{"name", "base_url", "requires_openai_auth", "wire_api", "env_key"} {
+	for _, field := range []string{"base_url", "requires_openai_auth", "wire_api", "env_key"} {
 		t.Run(field, func(t *testing.T) {
 			var changed map[string]any
 			if err := toml.Unmarshal(data, &changed); err != nil {
@@ -1189,7 +1194,7 @@ func TestCodexDirectoryPrecedenceAndDiagnosisRedaction(t *testing.T) {
 	}
 }
 
-func TestCodexRestoreKeepsUserSettingsAndDropsModelResidue(t *testing.T) {
+func TestCodexBackupRestoreAndRelayPreserveUserSettings(t *testing.T) {
 	original := []byte("model_provider='openai'\nmodel='official-model'\nmodel_catalog_json='official-catalog'\n[mcp_servers.old]\ncommand='old'\n")
 	live := []byte("model_provider='codexrelay'\nmodel='api-model'\nmodel_catalog_json='api-catalog'\n[mcp_servers.new]\ncommand='new'\n[desktop]\nsetting=true\n")
 	merged, err := preserveCodexUserSettings(original, live)
@@ -1209,8 +1214,16 @@ func TestCodexRestoreKeepsUserSettingsAndDropsModelResidue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(output), "model_catalog_json") || strings.Contains(string(output), "model_context_window") || strings.Contains(string(output), "model_auto_compact_token_limit") {
-		t.Fatal("old model limits survived")
+	rendered, err := readCodexTOML(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rendered["model"] != "new" || rendered["model_catalog_json"] != "old.json" || rendered["model_context_window"] != int64(1000) {
+		t.Fatal("explicit model not applied or user model settings lost")
+	}
+	profile := rendered["profiles"].(map[string]any)["x"].(map[string]any)
+	if profile["model_auto_compact_token_limit"] != int64(500) {
+		t.Fatal("inactive profile model settings lost")
 	}
 }
 

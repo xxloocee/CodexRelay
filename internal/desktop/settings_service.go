@@ -140,13 +140,13 @@ func syncManagedClientConfigs(previous, next config.AppConfig, dataDirectory str
 			continue
 		}
 		status, err := clientconfig.Inspect(previous, category)
-		if err != nil {
+		if err != nil && category != config.CategoryCodex {
 			return nil, managedClientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %w", category, err), results)
 		}
-		if status.Status == "error" {
+		if status.Status == "error" && category != config.CategoryCodex {
 			return nil, managedClientConfigRollbackError(fmt.Errorf("检查 %s 客户端配置失败: %s", category, status.Error), results)
 		}
-		if !clientconfig.IsManagedState(status.ConfigState) {
+		if category != config.CategoryCodex && !clientconfig.IsManagedState(status.ConfigState) {
 			continue
 		}
 		result, err := clientconfig.UpdateManagedWithResult(next, category, next.ActiveProfiles[category], dataDirectory)

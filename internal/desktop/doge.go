@@ -309,9 +309,14 @@ func (s *DesktopService) EnableDogeToken(id int64) (outcome error) {
 	previousID := state.Config.ActiveProfiles[category]
 	var configResult clientconfig.ConfigureResult
 	entry := state.Config.ClientConfigs[category]
-	// 后台令牌启用只同步已经由 CodexRelay 接管的客户端；尚未接管的
-	// 外部配置仍须等待用户在主界面明确确认。
-	if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
+	// Codex 令牌启用直接写入请求通道；其他客户端保留已有接管规则。
+	if category == config.CategoryCodex && !entry.SkipConfigReplacement {
+		var writeErr error
+		configResult, writeErr = clientconfig.UpdateManagedWithResult(next, category, profileID, s.runtime.DataDirectory())
+		if writeErr != nil {
+			return fmt.Errorf("更新客户端配置失败: %w", writeErr)
+		}
+	} else if clientconfig.Supports(category) && !entry.SkipConfigReplacement {
 		status, inspectErr := clientconfig.Inspect(state.Config, category)
 		if inspectErr != nil {
 			return fmt.Errorf("检查客户端配置失败: %w", inspectErr)
@@ -324,11 +329,6 @@ func (s *DesktopService) EnableDogeToken(id int64) (outcome error) {
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
-		}
-	}
-	if category == config.CategoryCodex && configResult.Rollback == nil {
-		if err := clientconfig.RequireCodexRelayConfiguration(next); err != nil {
-			return err
 		}
 	}
 	err = s.updateConfig(func(cfg *config.AppConfig) error {
