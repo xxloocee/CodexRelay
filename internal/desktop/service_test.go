@@ -13,6 +13,7 @@ package desktop
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -1555,6 +1556,30 @@ func TestExpiredSubscriptionsDoNotIncreaseDisplayedPackageBalance(t *testing.T) 
 
 func newTestRuntime(t *testing.T, directory string, store *config.Store, cfg config.AppConfig) *relay.Runtime {
 	t.Helper()
+	// Skipped failover fixtures still need a valid client, isolated from the real home directory.
+	entry := cfg.ClientConfigs[config.CategoryCodex]
+	if entry.SkipConfigReplacement && entry.ConfigDir == "" {
+		entry.ConfigDir = filepath.Join(directory, "codex-fixture")
+		cfg.ClientConfigs[config.CategoryCodex] = entry
+		if err := os.MkdirAll(entry.ConfigDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		text := fmt.Sprintf("model_provider = %q\ncli_auth_credentials_store = %q\n[model_providers.codexrelay]\nname = %q\nbase_url = %q\nwire_api = %q\nrequires_openai_auth = true\n", "codexrelay", "file", "ergouzi.life", fmt.Sprintf("http://127.0.0.1:%d/codex", cfg.ProxyPort), "responses")
+		if err := os.WriteFile(filepath.Join(entry.ConfigDir, "config.toml"), []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		auth, err := json.Marshal(map[string]string{"OPENAI_API_KEY": cfg.LocalAccessToken})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(entry.ConfigDir, "auth.json"), auth, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Save(cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	usageStore, err := usage.NewStore(filepath.Join(directory, "usage.json"))
 	if err != nil {
 		t.Fatal(err)

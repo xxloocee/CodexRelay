@@ -2,6 +2,7 @@ import { SelectDirectory, SetClientConfigPath, SetClientConfigSkip } from "../..
 import { $, icon } from "../../core/dom.js";
 import { errorMessage, setButtonLoading, toast } from "../../core/feedback.js";
 import { drafts, serverState } from "../../core/store.js";
+import { appendCodexMaintenance } from "./codex-maintenance.js";
 
 export function createClientConfigs({ loadState }) {
   function renderClientConfigs() {
@@ -23,6 +24,11 @@ export function createClientConfigs({ loadState }) {
       status.textContent = client.statusText || "未检测到配置";
       status.className = `client-config-status status-${client.status || "not_detected"}`;
       info.append(title, status);
+      if (client.category === "codex") {
+        const source = document.createElement("small");
+        source.textContent = `目录来源：${({ explicit: "已保存目录", environment: "CODEX_HOME（已识别目录）", default: "默认目录" })[client.configDirSource] || "已保存目录"}`;
+        info.append(source);
+      }
       const control = document.createElement("div");
       control.className = "client-config-control";
       const input = document.createElement("input");
@@ -107,6 +113,7 @@ export function createClientConfigs({ loadState }) {
       });
       skipLabel.append(skip, Object.assign(document.createElement("span"), { textContent: "跳过配置文件替换" }));
       row.append(skipLabel);
+      if (client.category === "codex") appendCodexMaintenance(row);
       rows.appendChild(row);
       if (client.category === focusedInput) {
         const restored = row.querySelector("input[data-client-category]");

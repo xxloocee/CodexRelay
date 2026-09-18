@@ -22,6 +22,87 @@ import * as tasknotify$0 from "../tasknotify/models.js";
 // @ts-ignore: Unused imports
 import * as usage$0 from "../usage/models.js";
 
+export class CodexDiagnostics {
+    /**
+     * Creates a new CodexDiagnostics instance.
+     * @param {Partial<CodexDiagnostics>} [$$source = {}] - The source object to create the CodexDiagnostics.
+     */
+    constructor($$source = {}) {
+        if (!("upstreamOrigin" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["upstreamOrigin"] = "";
+        }
+        if (!("selectionFingerprint" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["selectionFingerprint"] = "";
+        }
+        if (!("backupDirectory" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["backupDirectory"] = "";
+        }
+        if (!("config" in $$source)) {
+            /**
+             * @member
+             * @type {clientconfig$0.CodexConfigDiagnosis}
+             */
+            this["config"] = (new clientconfig$0.CodexConfigDiagnosis());
+        }
+        if (!("logPath" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["logPath"] = "";
+        }
+        if (!("requestObserved" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["requestObserved"] = false;
+        }
+        if (!("lastRequestAt" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["lastRequestAt"] = 0;
+        }
+        if (!("message" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["message"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexDiagnostics instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CodexDiagnostics}
+     */
+    static createFrom($$source = {}) {
+        const $$createField3_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("config" in $$parsedSource) {
+            $$parsedSource["config"] = $$createField3_0($$parsedSource["config"]);
+        }
+        return new CodexDiagnostics(/** @type {Partial<CodexDiagnostics>} */($$parsedSource));
+    }
+}
+
 export class DesktopState {
     /**
      * Creates a new DesktopState instance.
@@ -207,19 +288,19 @@ export class DesktopState {
      * @returns {DesktopState}
      */
     static createFrom($$source = {}) {
-        const $$createField9_0 = $$createType0;
-        const $$createField11_0 = $$createType0;
-        const $$createField12_0 = $$createType2;
-        const $$createField13_0 = $$createType4;
-        const $$createField14_0 = $$createType6;
-        const $$createField15_0 = $$createType7;
-        const $$createField16_0 = $$createType8;
-        const $$createField17_0 = $$createType10;
-        const $$createField18_0 = $$createType11;
-        const $$createField20_0 = $$createType12;
-        const $$createField21_0 = $$createType13;
-        const $$createField22_0 = $$createType14;
-        const $$createField23_0 = $$createType15;
+        const $$createField9_0 = $$createType1;
+        const $$createField11_0 = $$createType1;
+        const $$createField12_0 = $$createType3;
+        const $$createField13_0 = $$createType5;
+        const $$createField14_0 = $$createType7;
+        const $$createField15_0 = $$createType8;
+        const $$createField16_0 = $$createType9;
+        const $$createField17_0 = $$createType11;
+        const $$createField18_0 = $$createType12;
+        const $$createField20_0 = $$createType13;
+        const $$createField21_0 = $$createType14;
+        const $$createField22_0 = $$createType15;
+        const $$createField23_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("proxyUrls" in $$parsedSource) {
             $$parsedSource["proxyUrls"] = $$createField9_0($$parsedSource["proxyUrls"]);
@@ -315,10 +396,10 @@ export class DogeBillingAnalysis {
      * @returns {DogeBillingAnalysis}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType16;
-        const $$createField1_0 = $$createType18;
-        const $$createField2_0 = $$createType18;
-        const $$createField3_0 = $$createType18;
+        const $$createField0_0 = $$createType17;
+        const $$createField1_0 = $$createType19;
+        const $$createField2_0 = $$createType19;
+        const $$createField3_0 = $$createType19;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("summary" in $$parsedSource) {
             $$parsedSource["summary"] = $$createField0_0($$parsedSource["summary"]);
@@ -492,7 +573,7 @@ export class DogeBillingRow {
      * @returns {DogeBillingRow}
      */
     static createFrom($$source = {}) {
-        const $$createField9_0 = $$createType19;
+        const $$createField9_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("token_metrics" in $$parsedSource) {
             $$parsedSource["token_metrics"] = $$createField9_0($$parsedSource["token_metrics"]);
@@ -594,10 +675,10 @@ export class DogeBillingSummary {
      * @returns {DogeBillingSummary}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType21;
-        const $$createField5_0 = $$createType21;
-        const $$createField6_0 = $$createType21;
-        const $$createField10_0 = $$createType19;
+        const $$createField3_0 = $$createType22;
+        const $$createField5_0 = $$createType22;
+        const $$createField6_0 = $$createType22;
+        const $$createField10_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("wallet_multiplier_overview" in $$parsedSource) {
             $$parsedSource["wallet_multiplier_overview"] = $$createField3_0($$parsedSource["wallet_multiplier_overview"]);
@@ -918,15 +999,15 @@ export class DogeState {
      * @returns {DogeState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType22;
-        const $$createField3_0 = $$createType23;
-        const $$createField7_0 = $$createType25;
-        const $$createField10_0 = $$createType3;
-        const $$createField11_0 = $$createType0;
-        const $$createField12_0 = $$createType27;
-        const $$createField13_0 = $$createType28;
-        const $$createField14_0 = $$createType30;
-        const $$createField15_0 = $$createType31;
+        const $$createField2_0 = $$createType23;
+        const $$createField3_0 = $$createType24;
+        const $$createField7_0 = $$createType26;
+        const $$createField10_0 = $$createType4;
+        const $$createField11_0 = $$createType1;
+        const $$createField12_0 = $$createType28;
+        const $$createField13_0 = $$createType29;
+        const $$createField14_0 = $$createType31;
+        const $$createField15_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("account" in $$parsedSource) {
             $$parsedSource["account"] = $$createField2_0($$parsedSource["account"]);
@@ -1269,7 +1350,7 @@ export class DogeUsageLogPage {
      * @returns {DogeUsageLogPage}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType33;
+        const $$createField3_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("items" in $$parsedSource) {
             $$parsedSource["items"] = $$createField3_0($$parsedSource["items"]);
@@ -1426,8 +1507,8 @@ export class ProfileInput {
      * @returns {ProfileInput}
      */
     static createFrom($$source = {}) {
-        const $$createField8_0 = $$createType0;
-        const $$createField9_0 = $$createType35;
+        const $$createField8_0 = $$createType1;
+        const $$createField9_0 = $$createType36;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField8_0($$parsedSource["headers"]);
@@ -1731,8 +1812,8 @@ export class PublicDogeNotifications {
      * @returns {PublicDogeNotifications}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType37;
-        const $$createField5_0 = $$createType39;
+        const $$createField3_0 = $$createType38;
+        const $$createField5_0 = $$createType40;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("announcements" in $$parsedSource) {
             $$parsedSource["announcements"] = $$createField3_0($$parsedSource["announcements"]);
@@ -2267,8 +2348,8 @@ export class PublicDogeTokenSwitchPrompt {
      * @returns {PublicDogeTokenSwitchPrompt}
      */
     static createFrom($$source = {}) {
-        const $$createField14_0 = $$createType41;
-        const $$createField15_0 = $$createType43;
+        const $$createField14_0 = $$createType42;
+        const $$createField15_0 = $$createType44;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("candidates" in $$parsedSource) {
             $$parsedSource["candidates"] = $$createField14_0($$parsedSource["candidates"]);
@@ -2463,8 +2544,8 @@ export class PublicProfile {
      * @returns {PublicProfile}
      */
     static createFrom($$source = {}) {
-        const $$createField9_0 = $$createType0;
-        const $$createField10_0 = $$createType45;
+        const $$createField9_0 = $$createType1;
+        const $$createField10_0 = $$createType46;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("headers" in $$parsedSource) {
             $$parsedSource["headers"] = $$createField9_0($$parsedSource["headers"]);
@@ -2545,8 +2626,8 @@ export class TaskNotificationState {
      * @returns {TaskNotificationState}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType46;
-        const $$createField6_0 = $$createType47;
+        const $$createField2_0 = $$createType47;
+        const $$createField6_0 = $$createType48;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("events" in $$parsedSource) {
             $$parsedSource["events"] = $$createField2_0($$parsedSource["events"]);
@@ -2685,51 +2766,52 @@ export class UpdateInfo {
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Map($Create.Any, $Create.Any);
-const $$createType1 = PublicProfile.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = $Create.Array($Create.Any);
-const $$createType4 = $Create.Map($Create.Any, $$createType3);
-const $$createType5 = clientconfig$0.PublicClientConfig.createFrom;
-const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = network$0.Settings.createFrom;
-const $$createType8 = network$0.SystemProxyInfo.createFrom;
-const $$createType9 = usage$0.RequestRecord.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = usage$0.Overview.createFrom;
-const $$createType12 = config$0.Preferences.createFrom;
-const $$createType13 = config$0.TokenSwitchSettings.createFrom;
-const $$createType14 = TaskNotificationState.createFrom;
-const $$createType15 = DogeState.createFrom;
-const $$createType16 = DogeBillingSummary.createFrom;
-const $$createType17 = DogeBillingRow.createFrom;
-const $$createType18 = $Create.Array($$createType17);
-const $$createType19 = DogeBillingTokenMetrics.createFrom;
-const $$createType20 = DogeBillingOverviewItem.createFrom;
-const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = PublicDogeAccount.createFrom;
-const $$createType23 = $Create.Map($Create.Any, $Create.Any);
-const $$createType24 = PublicDogeSubscription.createFrom;
-const $$createType25 = $Create.Array($$createType24);
-const $$createType26 = PublicDogeToken.createFrom;
-const $$createType27 = $Create.Array($$createType26);
-const $$createType28 = PublicDogeNotifications.createFrom;
-const $$createType29 = PublicDogeTokenSwitchPrompt.createFrom;
-const $$createType30 = $Create.Nullable($$createType29);
-const $$createType31 = $Create.Map($Create.Any, $$createType30);
-const $$createType32 = DogeUsageLog.createFrom;
-const $$createType33 = $Create.Array($$createType32);
-const $$createType34 = ModelInput.createFrom;
-const $$createType35 = $Create.Array($$createType34);
-const $$createType36 = PublicDogeAnnouncement.createFrom;
-const $$createType37 = $Create.Array($$createType36);
-const $$createType38 = PublicDogeAlert.createFrom;
-const $$createType39 = $Create.Array($$createType38);
-const $$createType40 = PublicDogeTokenSwitchCandidate.createFrom;
-const $$createType41 = $Create.Array($$createType40);
-const $$createType42 = PublicDogeTokenSwitchHistory.createFrom;
-const $$createType43 = $Create.Array($$createType42);
-const $$createType44 = PublicModel.createFrom;
-const $$createType45 = $Create.Array($$createType44);
-const $$createType46 = config$0.TaskNotificationEvents.createFrom;
-const $$createType47 = tasknotify$0.Status.createFrom;
+const $$createType0 = clientconfig$0.CodexConfigDiagnosis.createFrom;
+const $$createType1 = $Create.Map($Create.Any, $Create.Any);
+const $$createType2 = PublicProfile.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = $Create.Map($Create.Any, $$createType4);
+const $$createType6 = clientconfig$0.PublicClientConfig.createFrom;
+const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = network$0.Settings.createFrom;
+const $$createType9 = network$0.SystemProxyInfo.createFrom;
+const $$createType10 = usage$0.RequestRecord.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = usage$0.Overview.createFrom;
+const $$createType13 = config$0.Preferences.createFrom;
+const $$createType14 = config$0.TokenSwitchSettings.createFrom;
+const $$createType15 = TaskNotificationState.createFrom;
+const $$createType16 = DogeState.createFrom;
+const $$createType17 = DogeBillingSummary.createFrom;
+const $$createType18 = DogeBillingRow.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = DogeBillingTokenMetrics.createFrom;
+const $$createType21 = DogeBillingOverviewItem.createFrom;
+const $$createType22 = $Create.Array($$createType21);
+const $$createType23 = PublicDogeAccount.createFrom;
+const $$createType24 = $Create.Map($Create.Any, $Create.Any);
+const $$createType25 = PublicDogeSubscription.createFrom;
+const $$createType26 = $Create.Array($$createType25);
+const $$createType27 = PublicDogeToken.createFrom;
+const $$createType28 = $Create.Array($$createType27);
+const $$createType29 = PublicDogeNotifications.createFrom;
+const $$createType30 = PublicDogeTokenSwitchPrompt.createFrom;
+const $$createType31 = $Create.Nullable($$createType30);
+const $$createType32 = $Create.Map($Create.Any, $$createType31);
+const $$createType33 = DogeUsageLog.createFrom;
+const $$createType34 = $Create.Array($$createType33);
+const $$createType35 = ModelInput.createFrom;
+const $$createType36 = $Create.Array($$createType35);
+const $$createType37 = PublicDogeAnnouncement.createFrom;
+const $$createType38 = $Create.Array($$createType37);
+const $$createType39 = PublicDogeAlert.createFrom;
+const $$createType40 = $Create.Array($$createType39);
+const $$createType41 = PublicDogeTokenSwitchCandidate.createFrom;
+const $$createType42 = $Create.Array($$createType41);
+const $$createType43 = PublicDogeTokenSwitchHistory.createFrom;
+const $$createType44 = $Create.Array($$createType43);
+const $$createType45 = PublicModel.createFrom;
+const $$createType46 = $Create.Array($$createType45);
+const $$createType47 = config$0.TaskNotificationEvents.createFrom;
+const $$createType48 = tasknotify$0.Status.createFrom;

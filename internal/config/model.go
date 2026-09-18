@@ -90,6 +90,7 @@ var Categories = []string{
 // 外部文件正文。
 type ClientConfig struct {
 	ConfigDir             string `json:"configDir,omitempty"`
+	ConfigDirSource       string `json:"configDirSource,omitempty"`
 	ConfigFile            string `json:"configFile,omitempty"`
 	SkipConfigReplacement bool   `json:"skipConfigReplacement,omitempty"`
 	Mode                  string `json:"mode,omitempty"`

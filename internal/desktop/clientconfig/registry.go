@@ -44,6 +44,7 @@ type PublicClientConfig struct {
 	Category                string `json:"category"`
 	Label                   string `json:"label"`
 	ConfigDir               string `json:"configDir"`
+	ConfigDirSource         string `json:"configDirSource"`
 	ConfigFile              string `json:"configFile"`
 	SkipConfigReplacement   bool   `json:"skipConfigReplacement"`
 	OfficialBackupAvailable bool   `json:"officialBackupAvailable"`
@@ -77,7 +78,7 @@ func clientDefinitions() []clientDefinition {
 		hermesHome = filepath.Join(localAppData, "hermes")
 	}
 	return []clientDefinition{
-		{Category: config.CategoryCodex, Label: "Codex", File: "config.toml", Kind: "codex", Default: func() string { return filepath.Join(home, ".codex") }},
+		{Category: config.CategoryCodex, Label: "Codex", File: "config.toml", Kind: "codex", Default: defaultCodexDirectory},
 		{Category: config.CategoryClaude, Label: "Claude", File: "settings.json", Kind: "claude", Default: func() string { return filepath.Join(home, ".claude") }},
 		{Category: config.CategoryGemini, Label: "Gemini", File: ".env", Kind: "gemini", Default: func() string { return filepath.Join(home, ".gemini") }},
 		{Category: config.CategoryGrok, Label: "Grok", File: "config.toml", Kind: "grok", Default: func() string { return filepath.Join(home, ".grok") }, RequiresProfile: true},
@@ -138,6 +139,10 @@ func discoverClientConfigPaths(cfg config.AppConfig) (map[string]config.ClientCo
 		_, file := clientConfigPath(definition, config.ClientConfig{ConfigDir: directory, ConfigFile: definition.File})
 		if clientConfigDetected(definition, directory, file) {
 			entry.ConfigDir = directory
+			entry.ConfigDirSource = "default"
+			if definition.Category == config.CategoryCodex {
+				_, entry.ConfigDirSource = ResolveCodexDirectory(config.ClientConfig{})
+			}
 			entry.ConfigFile = definition.File
 			result[definition.Category] = entry
 			changed = true
@@ -194,6 +199,9 @@ func inspectClientConfig(cfg config.AppConfig, definition clientDefinition) Publ
 	entry := cfg.ClientConfigs[definition.Category]
 	directory, file := clientConfigPath(definition, entry)
 	status := PublicClientConfig{Category: definition.Category, Label: definition.Label, ConfigDir: directory, ConfigFile: file, SkipConfigReplacement: entry.SkipConfigReplacement, OfficialBackupAvailable: len(entry.OfficialBackups) > 0, ConfigState: clientConfigState(entry, false, false), RequiresProfile: definition.RequiresProfile, Status: clientStatusNotDetected, StatusText: "未检测到配置"}
+	if definition.Category == config.CategoryCodex {
+		_, status.ConfigDirSource = ResolveCodexDirectory(entry)
+	}
 	if definition.Kind == "unsupported" {
 		status.Status = clientStatusUnsupported
 		status.StatusText = "暂不支持自动配置"
@@ -661,30 +669,7 @@ func clientConfigurationMatches(definition clientDefinition, directory, file, en
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
-		provider := strings.ToLower(strings.TrimSpace(tomlTopLevelValue(string(configData), "model_provider")))
-		providerSection := ""
-		if provider == codexRelayModelProviderID || provider == codexLegacyModelProviderID {
-			providerSection = "model_providers." + provider
-		}
-		baseURL := tomlSectionValue(string(configData), providerSection, "base_url")
-		var auth map[string]any
-		if len(authData) > 0 {
-			if err := json.Unmarshal(authData, &auth); err != nil {
-				return false, nil
-			}
-		}
-		// Codex's Responses API provider and local API-key auth are both Relay
-		// ownership markers. Requiring the exact auth object prevents an OAuth
-		// config or unrelated credentials from being treated as managed.
-		wireAPI := tomlSectionValue(string(configData), providerSection, "wire_api")
-		requiresOpenAIAuth := tomlSectionValue(string(configData), providerSection, "requires_openai_auth")
-		matches := providerSection != "" && baseURL == endpoint && wireAPI == "responses" && requiresOpenAIAuth == "true" && len(auth) == 1 && stringField(auth, "OPENAI_API_KEY") == key
-		if expectedModel != "" {
-			matches = matches && tomlTopLevelValue(string(configData), "model") == expectedModel
-		} else if expectNoModel {
-			matches = matches && tomlTopLevelValue(string(configData), "model") == ""
-		}
-		return matches, nil
+		return codexRelayConfigurationMatches(configData, authData, endpoint, key, expectedModel, expectNoModel)
 	case "gemini":
 		data, err := os.ReadFile(filepath.Join(directory, ".env"))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {

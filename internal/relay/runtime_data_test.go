@@ -19,6 +19,44 @@ import (
 	"codexrelay/internal/usage"
 )
 
+func TestRequestObservationSurvivesOnlyUnchangedConnection(t *testing.T) {
+	directory := t.TempDir()
+	cfg := config.Default(18765)
+	cfg.ActiveProfiles[config.CategoryCodex] = "test"
+	cfg.Profiles = []config.Profile{{ID: "test", Source: config.SourceCustom, Category: config.CategoryCodex, Name: "Test", BaseURL: "https://example.invalid/v1", APIKey: "synthetic-key"}}
+	usageStore, err := usage.NewStore(filepath.Join(directory, "usage.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := New(config.NewStore(filepath.Join(directory, "config.json")), usageStore, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := runtime.State().Active[config.CategoryCodex].RequestObservation
+	original.LastRequestAt.Store(123)
+	original.RequestDiagnosticLogged.Store(true)
+	if _, err := runtime.UpdateConfig(func(next *config.AppConfig) error {
+		next.Profiles[0].Name = "Renamed"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	retained := runtime.State().Active[config.CategoryCodex].RequestObservation
+	if retained != original || retained.LastRequestAt.Load() != 123 || !retained.RequestDiagnosticLogged.Load() {
+		t.Fatal("unrelated update lost request observation")
+	}
+	if _, err := runtime.UpdateConfig(func(next *config.AppConfig) error {
+		next.Profiles[0].APIKey = "another-synthetic-key"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	changed := runtime.State().Active[config.CategoryCodex].RequestObservation
+	if changed == original || changed.LastRequestAt.Load() != 0 || changed.RequestDiagnosticLogged.Load() {
+		t.Fatal("changed connection retained stale request observation")
+	}
+}
+
 func TestRuntimeMigrateDataDirectorySwitchesStores(t *testing.T) {
 	oldDirectory := t.TempDir()
 	newDirectory := filepath.Join(t.TempDir(), "new-data")

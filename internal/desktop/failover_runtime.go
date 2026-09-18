@@ -12,6 +12,13 @@ import (
 // handleUpstreamResult 在当前活动令牌真正成功后结束该类别的故障轮次，并刷新已显示的手动故障提示。
 // 自动切换成功后的通知继续保留到用户确认；这里只清理尝试集合，使后续新故障可以开始新一轮。
 func (s *DesktopService) handleUpstreamResult(profileID, category string, status int, transportError bool) {
+	if category == config.CategoryCodex {
+		if snapshot := s.runtime.State(); snapshot != nil {
+			if active := snapshot.Active[category]; active != nil && active.Profile.ID == profileID && active.LastRequestAt.Load() > 0 && active.RequestDiagnosticLogged.CompareAndSwap(false, true) {
+				s.writeCodexDiagnostic("relay_request_observed", "reached_relay_not_proof_of_upstream_success")
+			}
+		}
+	}
 	if transportError || status >= 400 || profileID == "" || category == "" {
 		return
 	}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -307,7 +308,7 @@ func resolveCodexUserPath(raw string) string {
 }
 
 func codexHistoryDatabaseIDs(path, sourceProviderID string) ([]string, error) {
-	database, err := openCodexHistoryDatabase(path)
+	database, err := openCodexHistoryDatabaseMode(path, "ro")
 	if err != nil {
 		return nil, fmt.Errorf("打开 Codex 状态数据库失败: %w", err)
 	}
@@ -350,7 +351,18 @@ func codexHistoryDatabaseIDs(path, sourceProviderID string) ([]string, error) {
 }
 
 func openCodexHistoryDatabase(path string) (*sql.DB, error) {
-	database, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=rw")
+	return openCodexHistoryDatabaseMode(path, "rw")
+}
+
+func openCodexHistoryDatabaseMode(path, mode string) (*sql.DB, error) {
+	// URL encoding prevents path characters such as '?' from changing SQLite
+	// connection options. Inspection never requests a writable connection.
+	uriPath := filepath.ToSlash(path)
+	if filepath.VolumeName(path) != "" && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	uri := &url.URL{Scheme: "file", Path: uriPath, RawQuery: "mode=" + mode}
+	database, err := sql.Open("sqlite", uri.String())
 	if err != nil {
 		return nil, err
 	}

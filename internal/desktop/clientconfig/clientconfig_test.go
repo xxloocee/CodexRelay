@@ -11,13 +11,196 @@
 package clientconfig
 
 import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
+
 	"codexrelay/internal/config"
+	"codexrelay/internal/storage"
 )
+
+func TestHistoryRepairUsesActualProviderWithoutAuthGate(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	dir := t.TempDir()
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir, Mode: "relay"}
+	// Default OpenAI remains valid with no config.toml and stale Relay metadata.
+	if target, err := allRepairTarget(cfg, dir); err != nil || target != "openai" {
+		t.Fatalf("default: %s %v", target, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), []byte(`{"auth_mode":"chatgpt","OPENAI_API_KEY":null,"tokens":{"account_id":"synthetic","access_token":"synthetic"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ config, target string }{
+		{"model_provider='openai'\n", "openai"},
+		{"profile='chosen'\n[model_providers.vendor]\nname='vendor'\nbase_url='https://example.invalid'\n[model_providers.unused]\nname='unused'\n[profiles.chosen]\nmodel_provider='vendor'\n", "vendor"},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(item.config), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if target, err := allRepairTarget(cfg, dir); err != nil || target != item.target {
+			t.Fatalf("actual provider: %s %v", target, err)
+		}
+	}
+}
+
+func TestHistoryRepairInterruptedRestoreAndLock(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	dir, dataDir := t.TempDir(), t.TempDir()
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir}
+	root := filepath.Join(dataDir, codexHistoryBackupDirectory, "interrupted")
+	manifest := allRepairManifest{Version: 2, Directory: dir, Target: "openai"}
+	var originals [][]byte
+	for i := 0; i < 2; i++ {
+		before := []byte(fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{\"id\":\"%d\",\"model_provider\":\"vendor\"}}\n", i))
+		after, _, err := rewriteAllRepairJSONL(before, "openai")
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel := filepath.Join("sessions", fmt.Sprintf("%d.jsonl", i))
+		current := before
+		if i == 0 {
+			current = after
+		}
+		if err := storage.WriteBytesAtomic(filepath.Join(dir, rel), ".test-*", current, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := storage.WriteBytesAtomic(filepath.Join(root, fmt.Sprintf("%d.jsonl", i)), ".test-*", before, 0600); err != nil {
+			t.Fatal(err)
+		}
+		manifest.Files = append(manifest.Files, repairFile{rel, sha256Hex(before), sha256Hex(after), 0600})
+		manifest.Rows = append(manifest.Rows, allRepairRow{Table: "threads", ID: fmt.Sprint(i), Before: sql.NullString{String: "vendor", Valid: true}})
+		originals = append(originals, before)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(dir, codexStateDatabaseFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE threads(id TEXT PRIMARY KEY,model_provider TEXT); INSERT INTO threads VALUES ('0','vendor'),('1','vendor')"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	if err := storage.WriteJSONAtomic(filepath.Join(root, "repair-manifest.json"), ".test-*", manifest); err != nil {
+		t.Fatal(err)
+	}
+	// A stale on-disk lock must not block, but a live OS lock must.
+	if err := os.WriteFile(filepath.Join(dir, ".codexrelay-history-repair.lock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := repairLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := repairLock(dir); err == nil {
+		second()
+		unlock()
+		t.Fatal("live lock accepted")
+	}
+	unlock()
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := restoreCodexHistoryRepair(cfg, dataDir, "interrupted", func() error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, file := range manifest.Files {
+		body, err := os.ReadFile(filepath.Join(dir, file.Relative))
+		if err != nil || string(body) != string(originals[i]) {
+			t.Fatalf("partial restore lost file %d: %v", i, err)
+		}
+	}
+	// Independent changes remain a conflict, not an excuse to overwrite history.
+	if err := os.WriteFile(filepath.Join(dir, manifest.Files[0].Relative), []byte("new conversation"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreCodexHistoryRepair(cfg, dataDir, "interrupted", func() error { return nil }); err == nil {
+		t.Fatal("external edit overwritten")
+	}
+}
+
+func TestHistoryRepairRebuildsLocalCatalogAndRestores(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	dir, dataDir := t.TempDir(), t.TempDir()
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: dir}
+	db, err := sql.Open("sqlite", filepath.Join(dir, codexStateDatabaseFilename))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	execSQL := func(query string, args ...any) {
+		t.Helper()
+		if _, err := db.Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execSQL(`CREATE TABLE threads(id TEXT PRIMARY KEY,model_provider TEXT,name TEXT,created_at_ms INTEGER,updated_at_ms INTEGER,cwd TEXT,source TEXT,rollout_path TEXT,archived INTEGER,has_user_event INTEGER,agent_role TEXT);
+CREATE TABLE local_thread_catalog_hosts(host_id TEXT PRIMARY KEY,host_kind TEXT);
+INSERT INTO local_thread_catalog_hosts VALUES('this-host','local'),('remote','remote');
+CREATE TABLE local_thread_catalog(host_id TEXT,thread_id TEXT,display_title TEXT,source_created_at REAL,source_updated_at REAL,cwd TEXT,source_kind TEXT,model_provider TEXT,observation_sequence INTEGER,missing_candidate INTEGER,source_detail TEXT,PRIMARY KEY(host_id,thread_id));
+CREATE TABLE local_thread_catalog_metadata(id INTEGER PRIMARY KEY,catalog_revision INTEGER);`)
+	for _, id := range []string{"missing", "hidden", "child", "archived"} {
+		path := filepath.Join(dir, "sessions", id+".jsonl")
+		source := "cli"
+		archived := 0
+		if id == "child" {
+			source = "subagent"
+		}
+		if id == "archived" {
+			archived = 1
+		}
+		body := fmt.Sprintf("{\"type\":\"session_meta\",\"payload\":{\"id\":%q,\"source\":%q,\"model_provider\":\"vendor\"}}\n", id, source)
+		if err := storage.WriteBytesAtomic(path, ".test-*", []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		execSQL("INSERT INTO threads VALUES(?, 'vendor',?,1700000000000,1700000001000,'/project',?,?,?,1,'')", id, id, source, path, archived)
+	}
+	execSQL("INSERT INTO local_thread_catalog(host_id,thread_id,model_provider,observation_sequence,missing_candidate) VALUES ('this-host','hidden','vendor',9007199254740992,1),('remote','missing','remote-vendor',1,1)")
+	preview, err := PreviewCodexHistoryRepair(cfg, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := applyCodexHistoryRepair(cfg, dataDir, "all", preview.Token, func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count, hidden int
+	var provider string
+	var created float64
+	if err := db.QueryRow("SELECT COUNT(*) FROM local_thread_catalog WHERE host_id='this-host'").Scan(&count); err != nil || count != 2 {
+		t.Fatalf("catalog count %d %v", count, err)
+	}
+	if err := db.QueryRow("SELECT model_provider,source_created_at FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='missing'").Scan(&provider, &created); err != nil || provider != "openai" || created != 1700000000 {
+		t.Fatalf("catalog values: %s %v %v", provider, created, err)
+	}
+	if err := db.QueryRow("SELECT missing_candidate FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='hidden'").Scan(&hidden); err != nil || hidden != 0 {
+		t.Fatalf("hidden marker %d %v", hidden, err)
+	}
+	if err := db.QueryRow("SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id=1").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("revision %d %v", count, err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := restoreCodexHistoryRepair(cfg, dataDir, result.BackupID, func() error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM local_thread_catalog WHERE host_id='this-host'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("restore count %d %v", count, err)
+	}
+	if err := db.QueryRow("SELECT missing_candidate,model_provider FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='hidden'").Scan(&hidden, &provider); err != nil || hidden != 1 || provider != "vendor" {
+		t.Fatalf("restore marker %d %s %v", hidden, provider, err)
+	}
+	if err := db.QueryRow("SELECT model_provider FROM local_thread_catalog WHERE host_id='remote'").Scan(&provider); err != nil || provider != "remote-vendor" {
+		t.Fatalf("remote changed %s %v", provider, err)
+	}
+}
 
 func isolatedClientDiscoveryConfig(t *testing.T, proxyPort int) config.AppConfig {
 	t.Helper()
@@ -824,5 +1007,542 @@ func TestExplicitTakeoverRepairsPartialGeminiWithoutOfficialSnapshot(t *testing.
 	currentSettings, settingsErr = os.ReadFile(settingsPath)
 	if envErr != nil || settingsErr != nil || string(currentEnv) != string(envData) || string(currentSettings) != string(settingsData) {
 		t.Fatal("rollback did not restore mixed Gemini files")
+	}
+}
+
+func TestCodexConnectionIsExclusiveAcrossProfiles(t *testing.T) {
+	source := []byte(`"model_provider" = "openai"
+profile = "official"
+cli_auth_credentials_store = "keyring"
+forced_login_method = "chatgpt"
+[profiles.official]
+model_provider = "openai"
+model = "old-model"
+cli_auth_credentials_store = "keyring"
+model_reasoning_effort = "high"
+[profiles.other]
+model_provider = "old"
+[model_providers."old"]
+name = "Old"
+base_url = "https://old.example/v1"
+env_key = "OLD_KEY"
+[model_providers."codexrelay"]
+name = "Wrong"
+base_url = "https://api.openai.com/v1"
+requires_openai_auth = false
+experimental_bearer_token = "synthetic"
+[mcp_servers.example]
+command = "keep-me"
+`)
+	endpoint, key := "http://127.0.0.1:18765/codex", "sk-placeholder"
+	data, auth, err := renderCodexData("unused", source, nil, endpoint, key, "new-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]any
+	if err := toml.Unmarshal(data, &value); err != nil {
+		t.Fatal(err)
+	}
+	providers := value["model_providers"].(map[string]any)
+	if len(providers) != 1 || providers["codexrelay"] == nil || value["model_provider"] != "codexrelay" {
+		t.Fatal("multiple providers survived")
+	}
+	profiles := value["profiles"].(map[string]any)
+	for _, raw := range profiles {
+		profile := raw.(map[string]any)
+		if profile["model_provider"] != nil || profile["cli_auth_credentials_store"] != nil || profile["model"] != nil {
+			t.Fatal("profile can override connection")
+		}
+	}
+	if profiles["official"].(map[string]any)["model_reasoning_effort"] != "high" || value["mcp_servers"].(map[string]any)["example"].(map[string]any)["command"] != "keep-me" {
+		t.Fatal("unrelated settings lost")
+	}
+	if ok, err := codexRelayConfigurationMatches(data, auth, endpoint, key, "new-model", false); err != nil || !ok {
+		t.Fatalf("valid connection rejected: %v", err)
+	}
+	for _, field := range []string{"name", "base_url", "requires_openai_auth", "wire_api", "env_key"} {
+		t.Run(field, func(t *testing.T) {
+			var changed map[string]any
+			if err := toml.Unmarshal(data, &changed); err != nil {
+				t.Fatal(err)
+			}
+			provider := changed["model_providers"].(map[string]any)["codexrelay"].(map[string]any)
+			if field == "requires_openai_auth" {
+				provider[field] = false
+			} else {
+				provider[field] = "wrong"
+			}
+			bad, err := marshalCodexTOML(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := codexRelayConfigurationMatches(bad, auth, endpoint, key, "", false); err == nil && ok {
+				t.Fatal("conflicting field accepted")
+			}
+		})
+	}
+	if _, _, err := renderCodexData("unused", []byte("model_provider = 'openai'\n\"model_provider\" = 'old'\n"), nil, endpoint, key, ""); err == nil {
+		t.Fatal("duplicate TOML key accepted")
+	}
+}
+
+func TestCodexOfficialNormalizationPreservesKeyringAndExclusiveAuth(t *testing.T) {
+	for _, source := range []string{
+		"model_provider = 'openai'\ncli_auth_credentials_store = 'keyring'\n",
+		"profile = 'official'\n[profiles.official]\nmodel_provider = 'openai'\ncli_auth_credentials_store = 'keyring'\n",
+	} {
+		data, auth, err := renderCodexOfficialData([]byte(source), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value map[string]any
+		if err := toml.Unmarshal(data, &value); err != nil {
+			t.Fatal(err)
+		}
+		if value["cli_auth_credentials_store"] != "keyring" || len(auth) != 0 {
+			t.Fatal("keyring login replaced")
+		}
+	}
+	data, auth, err := renderCodexOfficialData([]byte("model_provider = 'openai'\n[model_providers.old]\nbase_url = 'https://old.example'\n"), []byte(`{"auth_mode":"chatgpt","OPENAI_API_KEY":"synthetic-stale","tokens":{"account_id":"placeholder","access_token":"placeholder"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "model_providers") || strings.Contains(string(auth), "OPENAI_API_KEY") || !strings.Contains(string(auth), "account_id") {
+		t.Fatal("official restore retained API configuration or lost account")
+	}
+}
+
+func TestCodexSkipRejectsOfficialProviderWithLocalKey(t *testing.T) {
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	dir := cfg.ClientConfigs[config.CategoryCodex].ConfigDir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("model_provider = 'openai'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := marshalJSONObject(map[string]any{"OPENAI_API_KEY": cfg.LocalAccessToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "auth.json"), auth, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireCodexRelayConfiguration(cfg); err == nil {
+		t.Fatal("official provider with local key accepted")
+	}
+}
+
+func TestCodexDirectoryPrecedenceAndDiagnosisRedaction(t *testing.T) {
+	envDir, explicit := t.TempDir(), t.TempDir()
+	t.Setenv("CODEX_HOME", envDir)
+	if dir, source := ResolveCodexDirectory(config.ClientConfig{}); dir != envDir || source != "environment" {
+		t.Fatalf("env selection: %s %s", dir, source)
+	}
+	if dir, source := ResolveCodexDirectory(config.ClientConfig{ConfigDir: explicit}); dir != explicit || source != "explicit" {
+		t.Fatal("explicit path did not win")
+	}
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	cfg.ClientConfigs[config.CategoryCodex] = config.ClientConfig{ConfigDir: explicit}
+	cfg.LocalAccessToken = "sk-test-secret-local"
+	cfg.ActiveProfiles[config.CategoryCodex] = "synthetic"
+	data, auth, err := renderCodexData("unused", []byte("model_provider='sk-secret-provider'\n"), nil, "http://127.0.0.1:18765/codex", cfg.LocalAccessToken, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), "model_provider = \"codexrelay\"\n") {
+		t.Fatal("provider not first")
+	}
+	if err := os.WriteFile(filepath.Join(explicit, "config.toml"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(explicit, "auth.json"), auth, 0600); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis := DiagnoseCodex(cfg)
+	encoded, _ := json.Marshal(diagnosis)
+	if !diagnosis.Configured || strings.Contains(string(encoded), cfg.LocalAccessToken) || strings.Contains(string(encoded), "sk-secret-provider") {
+		t.Fatalf("bad diagnostic: %s", encoded)
+	}
+	delete(cfg.ActiveProfiles, config.CategoryCodex)
+	if err := os.WriteFile(filepath.Join(explicit, "config.toml"), []byte("model_provider='openai'\ncli_auth_credentials_store='keyring'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(explicit, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis = DiagnoseCodex(cfg)
+	if !diagnosis.Configured || diagnosis.Mode != "official" || diagnosis.AuthSource != "keyring" {
+		t.Fatalf("official diagnostic: %+v", diagnosis)
+	}
+}
+
+func TestCodexRestoreKeepsUserSettingsAndDropsModelResidue(t *testing.T) {
+	original := []byte("model_provider='openai'\nmodel='official-model'\nmodel_catalog_json='official-catalog'\n[mcp_servers.old]\ncommand='old'\n")
+	live := []byte("model_provider='codexrelay'\nmodel='api-model'\nmodel_catalog_json='api-catalog'\n[mcp_servers.new]\ncommand='new'\n[desktop]\nsetting=true\n")
+	merged, err := preserveCodexUserSettings(original, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := readCodexTOML(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcp := value["mcp_servers"].(map[string]any)
+	if mcp["old"] != nil || mcp["new"] == nil || value["model"] != "official-model" || value["model_catalog_json"] != "official-catalog" {
+		t.Fatal("incorrect restore ownership")
+	}
+	input := []byte("model='old'\nmodel_catalog_json='old.json'\nmodel_context_window=1000\n[profiles.x]\nmodel_auto_compact_token_limit=500\n")
+	output, err := renderCodexRelayTOML(input, "http://127.0.0.1:18765/codex", "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(output), "model_catalog_json") || strings.Contains(string(output), "model_context_window") || strings.Contains(string(output), "model_auto_compact_token_limit") {
+		t.Fatal("old model limits survived")
+	}
+}
+
+func TestCodexAllHistoryRepairOfficialRelayRoundTrip(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	dir := cfg.ClientConfigs[config.CategoryCodex].ConfigDir
+	dataDir := t.TempDir()
+	stopped := func() error { return nil }
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRelay := func() {
+		t.Helper()
+		data, auth, err := renderCodexData("unused", nil, nil, "http://127.0.0.1:18765/codex", cfg.LocalAccessToken, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range map[string][]byte{"config.toml": data, "auth.json": auth} {
+			if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cfg.ActiveProfiles[config.CategoryCodex] = "synthetic"
+		entry := cfg.ClientConfigs[config.CategoryCodex]
+		entry.Mode = "relay"
+		cfg.ClientConfigs[config.CategoryCodex] = entry
+	}
+	writeRelay()
+	originals := map[string][]byte{}
+	for id, provider := range map[string]string{"official": "openai", "custom": "vendor-a", "empty": "", "missing": "", "archived": "vendor-b", "child": "vendor-child"} {
+		payload := map[string]any{"id": id, "model_provider": provider, "source": "cli"}
+		if id == "missing" {
+			delete(payload, "model_provider")
+		}
+		if id == "child" {
+			payload["source"] = map[string]any{"subagent": map[string]any{"thread_spawn": map[string]any{"parent_thread_id": "custom"}}}
+		}
+		line, err := json.Marshal(map[string]any{"type": "session_meta", "payload": payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		folder := "sessions"
+		if id == "archived" {
+			folder = "archived_sessions"
+		}
+		path := filepath.Join(dir, folder, id+".jsonl")
+		originals[path] = append(line, '\n')
+		if err := os.WriteFile(path, originals[path], 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dbPath := filepath.Join(dir, codexStateDatabaseFilename)
+	execSQL := func(query string) {
+		t.Helper()
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	execSQL(`CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, source TEXT);
+INSERT INTO threads VALUES ('official','openai',0,'cli'),('custom','vendor-a',0,'cli'),('empty','',0,'cli'),('missing',NULL,0,'cli'),('archived','vendor-b',1,'cli'),('child','vendor-child',0,'subagent');
+CREATE TABLE local_thread_catalog_hosts (host_id TEXT PRIMARY KEY, host_kind TEXT);
+INSERT INTO local_thread_catalog_hosts VALUES ('this-host','local'),('remote-host','remote');
+CREATE TABLE local_thread_catalog (host_id TEXT, thread_id TEXT, model_provider TEXT, archived INTEGER, PRIMARY KEY(host_id,thread_id));
+INSERT INTO local_thread_catalog VALUES ('this-host','custom','vendor-a',0),('this-host','missing',NULL,0),('this-host','archived','vendor-b',1),('this-host','child','vendor-child',0),('remote-host','custom','vendor-remote',0);`)
+	assertProvider := func(query, expected string) {
+		t.Helper()
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		var actual string
+		if err := db.QueryRow(query).Scan(&actual); err != nil {
+			t.Fatal(err)
+		}
+		if actual != expected {
+			t.Fatalf("query %s: got %q want %q", query, actual, expected)
+		}
+	}
+	repair := func() CodexHistoryRepairResult {
+		t.Helper()
+		preview, err := PreviewCodexHistoryRepair(cfg, "all")
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := applyCodexHistoryRepair(cfg, dataDir, "all", preview.Token, stopped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	// A failure after rewriting files must roll back every provider, not only
+	// the original official bucket.
+	execSQL(`CREATE TRIGGER reject_catalog BEFORE UPDATE ON local_thread_catalog BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;`)
+	preview, err := PreviewCodexHistoryRepair(cfg, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyCodexHistoryRepair(cfg, dataDir, "all", preview.Token, stopped); err == nil {
+		t.Fatal("injected database failure accepted")
+	}
+	for path, original := range originals {
+		data, err := os.ReadFile(path)
+		if err != nil || string(data) != string(original) {
+			t.Fatalf("failure rollback lost original %s: %v", path, err)
+		}
+	}
+	assertProvider("SELECT model_provider FROM threads WHERE id='custom'", "vendor-a")
+	execSQL("DROP TRIGGER reject_catalog")
+	result := repair()
+	for _, id := range []string{"official", "custom", "empty", "missing", "archived"} {
+		assertProvider("SELECT model_provider FROM threads WHERE id='"+id+"'", "codexrelay")
+	}
+	assertProvider("SELECT model_provider FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='custom'", "codexrelay")
+	assertProvider("SELECT model_provider FROM local_thread_catalog WHERE host_id='remote-host' AND thread_id='custom'", "vendor-remote")
+	assertProvider("SELECT model_provider FROM threads WHERE id='child'", "vendor-child")
+	assertProvider("SELECT model_provider FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='child'", "vendor-child")
+	assertProvider("SELECT CAST(archived AS TEXT) FROM threads WHERE id='archived'", "1")
+	if _, err := restoreCodexHistoryRepair(cfg, dataDir, result.BackupID, stopped); err != nil {
+		t.Fatal(err)
+	}
+	for path, original := range originals {
+		data, err := os.ReadFile(path)
+		if err != nil || string(data) != string(original) {
+			t.Fatalf("restore lost original %s: %v", path, err)
+		}
+	}
+	assertProvider("SELECT COALESCE(model_provider,'NULL') FROM threads WHERE id='missing'", "NULL")
+	assertProvider("SELECT COALESCE(model_provider,'NULL') FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='missing'", "NULL")
+	assertProvider("SELECT model_provider FROM threads WHERE id='empty'", "")
+	assertProvider("SELECT model_provider FROM threads WHERE id='custom'", "vendor-a")
+	repair()
+	// Official mode must work without an active Relay profile or an API key file.
+	delete(cfg.ActiveProfiles, config.CategoryCodex)
+	entry := cfg.ClientConfigs[config.CategoryCodex]
+	entry.Mode = "official"
+	cfg.ClientConfigs[config.CategoryCodex] = entry
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("model_provider = \"openai\"\ncli_auth_credentials_store = \"keyring\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "auth.json")); err != nil {
+		t.Fatal(err)
+	}
+	repair()
+	assertProvider("SELECT model_provider FROM threads WHERE id='custom'", "openai")
+	assertProvider("SELECT model_provider FROM local_thread_catalog WHERE host_id='this-host' AND thread_id='custom'", "openai")
+	for path := range originals {
+		if strings.Contains(path, "child.jsonl") {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(data), `"model_provider":"openai"`) {
+			t.Fatalf("official repair failed %s: %v", path, err)
+		}
+	}
+	// Switching configuration after preview must invalidate its target binding.
+	entry.Mode = "" // A never-managed official client is also eligible.
+	cfg.ClientConfigs[config.CategoryCodex] = entry
+	preview, err = PreviewCodexHistoryRepair(cfg, "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRelay()
+	if _, err := applyCodexHistoryRepair(cfg, dataDir, "all", preview.Token, stopped); err == nil {
+		t.Fatal("changed repair target accepted")
+	}
+}
+
+func TestCodexHistoryPreviewBindsQueriedDatabaseCandidates(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	dir := cfg.ClientConfigs[config.CategoryCodex].ConfigDir
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, auth, err := renderCodexData("unused", nil, nil, "http://127.0.0.1:18765/codex", cfg.LocalAccessToken, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string][]byte{"config.toml": data, "auth.json": auth} {
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg.ActiveProfiles[config.CategoryCodex] = "synthetic"
+	dbPath := filepath.Join(dir, codexStateDatabaseFilename)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT); INSERT INTO threads VALUES ('first','openai');"); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := PreviewCodexHistoryRepair(cfg, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ThreadCount != 1 {
+		t.Fatalf("wrong preview count: %d", preview.ThreadCount)
+	}
+	files, databases, _, err := repairCollect(dir, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deterministically schedule an index update between the preview's ID query
+	// and byte hashing, without timing sleeps or touching a real Codex process.
+	if _, err := db.Exec("INSERT INTO threads VALUES ('second','openai')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := repairHistoryDigest(dir, files, databases)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexHistoryMigrationMu.Lock()
+	ticket := repairTickets[preview.Token]
+	ticket.digest = digest
+	repairTickets[preview.Token] = ticket
+	codexHistoryMigrationMu.Unlock()
+	if _, err := applyCodexHistoryRepair(cfg, t.TempDir(), "openai", preview.Token, func() error { return nil }); err == nil {
+		t.Fatal("repair accepted IDs outside the previewed candidate set")
+	}
+	ids, err := codexHistoryDatabaseIDs(dbPath, "openai")
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("rejected repair changed history: %v %v", ids, err)
+	}
+}
+
+func TestCodexExplicitHistoryRepairRoundTripAndDrift(t *testing.T) {
+	t.Setenv("CODEX_SQLITE_HOME", "")
+	cfg := isolatedClientDiscoveryConfig(t, 18765)
+	dir := cfg.ClientConfigs[config.CategoryCodex].ConfigDir
+	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	data, auth, err := renderCodexData("unused", nil, nil, "http://127.0.0.1:18765/codex", cfg.LocalAccessToken, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string][]byte{"config.toml": data, "auth.json": auth} {
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg.ActiveProfiles[config.CategoryCodex] = "synthetic"
+	session := filepath.Join(dir, "sessions", "sample.jsonl")
+	original := []byte("{\"type\":\"session_meta\",\"payload\":{\"id\":\"thread-1\",\"model_provider\":\"openai\"}}\n{\"type\":\"event_msg\",\"payload\":{\"message\":\"untouched\"}}\n")
+	if err := os.WriteFile(session, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(dir, codexStateDatabaseFilename)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT); INSERT INTO threads VALUES ('thread-1','openai'),('other','other');"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := PreviewCodexHistoryRepair(cfg, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.FileCount != 1 || preview.ThreadCount != 1 {
+		t.Fatalf("wrong preview: %+v", preview)
+	}
+	dataDir := t.TempDir()
+	stopped := func() error { return nil }
+	if _, err := applyCodexHistoryRepair(cfg, dataDir, "openai", preview.Token, func() error { return errors.New("running") }); err == nil {
+		t.Fatal("running process allowed")
+	}
+	preview, err = PreviewCodexHistoryRepair(cfg, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(session, append(append([]byte{}, original...), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyCodexHistoryRepair(cfg, dataDir, "openai", preview.Token, stopped); err == nil {
+		t.Fatal("drift allowed")
+	}
+	if err := os.WriteFile(session, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = PreviewCodexHistoryRepair(cfg, "openai")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := applyCodexHistoryRepair(cfg, dataDir, "openai", preview.Token, stopped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BackupID == "" {
+		t.Fatal("backup missing")
+	}
+	changed, err := os.ReadFile(session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(changed), "codexrelay") || !strings.Contains(string(changed), "untouched") {
+		t.Fatal("history rewrite wrong")
+	}
+	ids, err := codexHistoryDatabaseIDs(dbPath, "codexrelay")
+	if err != nil || len(ids) != 1 {
+		t.Fatalf("database rewrite: %v %v", ids, err)
+	}
+	if err := os.WriteFile(session, append(append([]byte{}, changed...), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreCodexHistoryRepair(cfg, dataDir, result.BackupID, stopped); err == nil {
+		t.Fatal("restore overwrote drift")
+	}
+	if err := os.WriteFile(session, changed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restoreCodexHistoryRepair(cfg, dataDir, result.BackupID, stopped); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadFile(session)
+	if err != nil || string(restored) != string(original) {
+		t.Fatal("history not restored")
+	}
+	ids, err = codexHistoryDatabaseIDs(dbPath, "openai")
+	if err != nil || len(ids) != 1 {
+		t.Fatal("database not restored")
+	}
+	// Legal quoted TOML must not bypass the external SQLite home restriction.
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("\"sqlite_home\" = '"+filepath.ToSlash(t.TempDir())+"'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PreviewCodexHistoryRepair(cfg, "openai"); err == nil {
+		t.Fatal("external SQLite accepted")
 	}
 }

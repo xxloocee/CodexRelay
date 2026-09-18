@@ -7,6 +7,191 @@
 import { Create as $Create } from "/wails/runtime.js";
 
 /**
+ * No free-form config values, secrets, account identifiers or parser errors.
+ */
+export class CodexConfigDiagnosis {
+    /**
+     * Creates a new CodexConfigDiagnosis instance.
+     * @param {Partial<CodexConfigDiagnosis>} [$$source = {}] - The source object to create the CodexConfigDiagnosis.
+     */
+    constructor($$source = {}) {
+        if (!("mode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["mode"] = "";
+        }
+        if (!("directory" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["directory"] = "";
+        }
+        if (!("directorySource" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["directorySource"] = "";
+        }
+        if (!("provider" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["provider"] = "";
+        }
+        if (!("authSource" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["authSource"] = "";
+        }
+        if (!("expectedURL" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["expectedURL"] = "";
+        }
+        if (!("validTOML" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["validTOML"] = false;
+        }
+        if (!("uniqueProvider" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["uniqueProvider"] = false;
+        }
+        if (!("providerFieldsMatch" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["providerFieldsMatch"] = false;
+        }
+        if (!("authMatches" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["authMatches"] = false;
+        }
+        if (!("configured" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["configured"] = false;
+        }
+        if (!("backupCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["backupCount"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexConfigDiagnosis instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CodexConfigDiagnosis}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexConfigDiagnosis(/** @type {Partial<CodexConfigDiagnosis>} */($$parsedSource));
+    }
+}
+
+export class CodexHistoryRepairResult {
+    /**
+     * Creates a new CodexHistoryRepairResult instance.
+     * @param {Partial<CodexHistoryRepairResult>} [$$source = {}] - The source object to create the CodexHistoryRepairResult.
+     */
+    constructor($$source = {}) {
+        if (!("token" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["token"] = "";
+        }
+        if (!("fileCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["fileCount"] = 0;
+        }
+        if (!("threadCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["threadCount"] = 0;
+        }
+        if (!("backupID" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["backupID"] = "";
+        }
+        if (!("message" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["message"] = "";
+        }
+        if (!("targetProvider" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["targetProvider"] = "";
+        }
+        if (!("skippedCount" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["skippedCount"] = 0;
+        }
+        if (!("warning" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["warning"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CodexHistoryRepairResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {CodexHistoryRepairResult}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new CodexHistoryRepairResult(/** @type {Partial<CodexHistoryRepairResult>} */($$parsedSource));
+    }
+}
+
+/**
  * PublicClientConfig 是高级设置和启用前检查使用的脱敏状态，不返回外部配置正文。
  */
 export class PublicClientConfig {
@@ -35,6 +220,13 @@ export class PublicClientConfig {
              * @type {string}
              */
             this["configDir"] = "";
+        }
+        if (!("configDirSource" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["configDirSource"] = "";
         }
         if (!("configFile" in $$source)) {
             /**

@@ -396,6 +396,10 @@ func RestoreOfficialConfig(files []config.ClientConfigBackup) error {
 }
 
 func RestoreOfficialConfigWithRollback(files []config.ClientConfigBackup) (func() error, error) {
+	return restoreOfficialConfigWithTransform(files, nil)
+}
+
+func restoreOfficialConfigWithTransform(files []config.ClientConfigBackup, transform func([]restoreTarget) error) (func() error, error) {
 	if len(files) == 0 {
 		return nil, errors.New("没有可恢复的官方客户端配置")
 	}
@@ -406,7 +410,7 @@ func RestoreOfficialConfigWithRollback(files []config.ClientConfigBackup) (func(
 			Mode: file.Mode, ExpectedSHA256: file.ExpectedSHA256, BackupSHA256: file.BackupSHA256,
 		})
 	}
-	return restoreConfigFilesTransaction(converted)
+	return restoreConfigFilesTransactionWithTransform(converted, transform)
 }
 
 type restoreTarget struct {
@@ -421,6 +425,10 @@ type restoreTarget struct {
 // file, then restores the complete batch. A failed write restores the files
 // already changed from their in-memory snapshots.
 func restoreConfigFilesTransaction(files []ConfigFileResult) (func() error, error) {
+	return restoreConfigFilesTransactionWithTransform(files, nil)
+}
+
+func restoreConfigFilesTransactionWithTransform(files []ConfigFileResult, transform func([]restoreTarget) error) (func() error, error) {
 	targets := make([]restoreTarget, 0, len(files))
 	for _, file := range files {
 		// An explicit official switch overwrites external edits. Verify the
@@ -451,6 +459,11 @@ func restoreConfigFilesTransaction(files []ConfigFileResult) (func() error, erro
 			}
 		}
 		targets = append(targets, target)
+	}
+	if transform != nil {
+		if err := transform(targets); err != nil {
+			return nil, err
+		}
 	}
 	applied := make([]restoreTarget, 0, len(targets))
 	rollback := func() error {

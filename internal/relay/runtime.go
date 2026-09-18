@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,10 +30,16 @@ import (
 )
 
 type ActiveProfile struct {
+	*RequestObservation
 	Profile   config.Profile
 	APIKey    string
 	Target    *url.URL
 	Transport *http.Transport
+}
+
+type RequestObservation struct {
+	LastRequestAt           atomic.Int64
+	RequestDiagnosticLogged atomic.Bool
 }
 
 type State struct {
@@ -91,7 +98,8 @@ func buildState(cfg config.AppConfig) (*State, error) {
 			return nil, err
 		}
 		state.Active[category] = &ActiveProfile{
-			Profile: config.CloneProfile(selected), APIKey: selected.APIKey,
+			RequestObservation: &RequestObservation{},
+			Profile:            config.CloneProfile(selected), APIKey: selected.APIKey,
 			Target: target, Transport: transport,
 		}
 	}
@@ -172,6 +180,19 @@ func (r *Runtime) UpdateConfig(mutator func(*config.AppConfig) error) (config.Ap
 	}
 	if err := r.configStore.Save(next); err != nil {
 		return config.AppConfig{}, err
+	}
+	// A quota refresh or UI setting does not represent a new connection. Share
+	// the atomic observation so concurrent in-flight requests cannot be lost.
+	for category, active := range state.Active {
+		old := current.Active[category]
+		if old != nil && old.RequestObservation != nil && old.Profile.ID == active.Profile.ID &&
+			old.APIKey == active.APIKey && old.Target.String() == active.Target.String() &&
+			reflect.DeepEqual(old.Profile.Headers, active.Profile.Headers) &&
+			current.Config.LocalAccessToken == next.LocalAccessToken && current.Config.ProxyPort == next.ProxyPort &&
+			current.Config.ClientAccessHost == next.ClientAccessHost &&
+			current.Config.ClientConfigs[category].ConfigDir == next.ClientConfigs[category].ConfigDir {
+			active.RequestObservation = old.RequestObservation
+		}
 	}
 	r.state.Store(state)
 	return next, nil

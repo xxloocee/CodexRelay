@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // codexOfficialConfigurationMatches recognizes the native ChatGPT OAuth
@@ -42,8 +41,11 @@ func codexOfficialConfigurationMatches(configData, authData []byte) (bool, error
 	if stringField(tokens, "access_token") == "" && stringField(tokens, "id_token") == "" && stringField(tokens, "refresh_token") == "" {
 		return false, nil
 	}
-	provider := tomlTopLevelValue(string(configData), "model_provider")
-	return provider == "" || provider == "openai", nil
+	value, err := readCodexTOML(configData)
+	if err != nil {
+		return false, err
+	}
+	return codexSelectedProvider(value) == "openai", nil
 }
 
 func configureCodex(configPath, authPath, endpoint, key, defaultModel string) error {
@@ -90,10 +92,9 @@ func renderCodexData(configPath string, configSource, authSource []byte, endpoin
 	if err := validateExternalValue("访问令牌", key); err != nil {
 		return nil, nil, err
 	}
-	configText := upsertTomlProviderWithModel(string(configSource), "codexrelay", endpoint, defaultModel)
-	if defaultModel == "" && configSource != nil {
-		configText = strings.Join(removeTomlTopLevelLine(strings.Split(strings.ReplaceAll(configText, "\r\n", "\n"), "\n"), "model"), "\n")
-		configText = strings.TrimRight(configText, "\n") + "\n"
+	configData, err := renderCodexRelayTOML(configSource, endpoint, defaultModel)
+	if err != nil {
+		return nil, nil, err
 	}
 	// Codex has two mutually exclusive authentication formats. Relay owns
 	// auth.json while active, so do not carry the official OAuth branch into it.
@@ -102,5 +103,5 @@ func renderCodexData(configPath string, configSource, authSource []byte, endpoin
 	if err != nil {
 		return nil, nil, fmt.Errorf("编码 Codex auth.json 失败: %w", err)
 	}
-	return []byte(configText), authData, nil
+	return configData, authData, nil
 }

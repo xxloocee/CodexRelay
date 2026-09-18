@@ -65,6 +65,34 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 	if filepath.Clean(oldDataDirectory) == directory {
 		return nil
 	}
+	// Repair restore IDs must remain usable after changing the Relay data root.
+	historySource := filepath.Join(oldDataDirectory, "codex-history-backups")
+	historyTarget := filepath.Join(directory, "codex-history-backups")
+	if relative, err := filepath.Rel(historySource, directory); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return errors.New("目标数据目录不能位于历史修复备份目录内")
+	}
+	historyCopied, migrationComplete := false, false
+	defer func() {
+		if historyCopied && !migrationComplete {
+			_ = os.RemoveAll(historyTarget)
+		}
+	}()
+	if _, err := os.Stat(historyTarget); err == nil {
+		return errors.New("目标数据目录已存在历史修复备份，拒绝覆盖")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if info, err := os.Stat(historySource); err == nil {
+		if !info.IsDir() {
+			return errors.New("历史修复备份路径不是目录")
+		}
+		historyCopied = true
+		if err := copyDirectory(historySource, historyTarget); err != nil {
+			return fmt.Errorf("迁移历史修复备份失败: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	backupSource := filepath.Join(oldDataDirectory, "client-backups")
 	backupTarget := filepath.Join(directory, "client-backups")
 	if relative, relErr := filepath.Rel(backupSource, directory); relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
@@ -115,6 +143,7 @@ func (s *DesktopService) SetDataDirectory(directory string) error {
 			application.Get().Logger.Warn("旧任务通知状态清理失败", "error", err)
 		}
 	}
+	migrationComplete = true // Keep the original history backup as an extra recovery copy.
 	if filepath.Clean(oldDirectory) != directory {
 		for _, name := range []string{"config.json", "usage.json"} {
 			if removeErr := os.Remove(filepath.Join(oldDirectory, name)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
@@ -133,6 +162,9 @@ func copyDirectory(source, target string) error {
 	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("备份目录中存在符号链接，拒绝迁移")
 		}
 		relative, err := filepath.Rel(source, path)
 		if err != nil {

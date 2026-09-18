@@ -282,7 +282,7 @@ func (s *DesktopService) RedeemDoge(code string) error {
 	return s.saveDogeData(data, announcements, baseURL, current.Config.Doge.AccessToken, current.Config.Doge.TokenOrder)
 }
 
-func (s *DesktopService) EnableDogeToken(id int64) error {
+func (s *DesktopService) EnableDogeToken(id int64) (outcome error) {
 	if id <= 0 {
 		return errors.New("二狗子令牌 ID 无效")
 	}
@@ -304,6 +304,8 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 		return errors.New("二狗子代理 API 准备失败")
 	}
 	category := next.Profiles[profileIndex].Category
+	finishDiagnostic := s.beginCodexSwitch(category)
+	defer func() { finishDiagnostic(outcome) }()
 	previousID := state.Config.ActiveProfiles[category]
 	var configResult clientconfig.ConfigureResult
 	entry := state.Config.ClientConfigs[category]
@@ -322,6 +324,11 @@ func (s *DesktopService) EnableDogeToken(id int64) error {
 			if err != nil {
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
+		}
+	}
+	if category == config.CategoryCodex && configResult.Rollback == nil {
+		if err := clientconfig.RequireCodexRelayConfiguration(next); err != nil {
+			return err
 		}
 	}
 	err = s.updateConfig(func(cfg *config.AppConfig) error {

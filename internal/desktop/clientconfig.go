@@ -104,6 +104,7 @@ func (s *DesktopService) SetClientConfigPath(category, directory string) error {
 		}
 		entry := cfg.ClientConfigs[category]
 		entry.ConfigDir = filepath.Clean(directory)
+		entry.ConfigDirSource = "explicit"
 		entry.ConfigFile = configFile
 		cfg.ClientConfigs[category] = entry
 		if err := clientconfig.ValidateClientConfigTargets(cfg.ClientConfigs); err != nil {
@@ -139,9 +140,11 @@ func (s *DesktopService) SetClientConfigSkip(category string, skip bool) error {
 
 // ConfigureClient 备份并写入当前分类的 CodexRelay 地址和本地访问令牌。
 // 它不改变令牌启用映射，调用方完成写入后再执行启用，避免配置失败却显示为已切换。
-func (s *DesktopService) ConfigureClient(category, profileID string) error {
+func (s *DesktopService) ConfigureClient(category, profileID string) (outcome error) {
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	finishDiagnostic := s.beginCodexSwitch(category)
+	defer func() { finishDiagnostic(outcome) }()
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("程序尚未初始化")

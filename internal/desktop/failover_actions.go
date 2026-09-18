@@ -157,9 +157,11 @@ func tokenSwitchCurrentWasRemoved(state *relay.State, prompt *PublicDogeTokenSwi
 		state.Config.ActiveProfiles[prompt.Category] == "" && config.FindProfileIndex(state.Config.Profiles, prompt.CurrentProfileID) < 0
 }
 
-func (s *DesktopService) switchProfile(category, currentID, candidateID string, allowRemovedCurrent bool) error {
+func (s *DesktopService) switchProfile(category, currentID, candidateID string, allowRemovedCurrent bool) (outcome error) {
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	finishDiagnostic := s.beginCodexSwitch(category)
+	defer func() { finishDiagnostic(outcome) }()
 	remoteID, remoteCandidate := dogeTokenIDFromFailoverProfileID(candidateID)
 	state := s.runtime.State()
 	if state == nil {
@@ -225,6 +227,11 @@ func (s *DesktopService) switchProfile(category, currentID, candidateID string, 
 				return fmt.Errorf("更新客户端配置失败: %w", err)
 			}
 			clientConfigRendered = true
+		}
+	}
+	if category == config.CategoryCodex && !clientConfigRendered {
+		if err := clientconfig.RequireCodexRelayConfiguration(effectiveConfig); err != nil {
+			return err
 		}
 	}
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {

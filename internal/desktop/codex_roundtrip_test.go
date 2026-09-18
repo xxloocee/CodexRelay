@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 
 	"codexrelay/internal/config"
 )
@@ -101,7 +104,7 @@ func TestCodexOAuthAPIRoundTripPreservesLogin(t *testing.T) {
 				if err := service.ActivateProfile("official:codex"); err != nil {
 					t.Fatal(err)
 				}
-				if read(authPath) != officialAuth || read(configPath) != officialConfig {
+				if !codexOfficialRoundTripMatches(t, read(configPath), read(authPath), officialAuth) {
 					t.Fatal("official configuration or OAuth login changed during round trip")
 				}
 				state := service.runtime.State().Config
@@ -126,9 +129,27 @@ func TestCodexOAuthAPIRoundTripPreservesLogin(t *testing.T) {
 			if err := service.ActivateProfile("official:codex"); err != nil {
 				t.Fatal(err)
 			}
-			if read(authPath) != officialAuth || read(configPath) != officialConfig {
+			if !codexOfficialRoundTripMatches(t, read(configPath), read(authPath), officialAuth) {
 				t.Fatal("fresh external OAuth login was replaced by a stale snapshot")
 			}
 		})
 	}
+}
+
+// The original backup may contain stale providers, but a restored account must not.
+func codexOfficialRoundTripMatches(t *testing.T, configText, authText, originalAuth string) bool {
+	t.Helper()
+	var cfg map[string]any
+	var auth, expected map[string]any
+	if err := toml.Unmarshal([]byte(configText), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(authText), &auth); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(originalAuth), &expected); err != nil {
+		t.Fatal(err)
+	}
+	delete(expected, "OPENAI_API_KEY")
+	return cfg["model_provider"] == "openai" && cfg["model"] == "gpt-5" && cfg["model_providers"] == nil && reflect.DeepEqual(auth, expected)
 }

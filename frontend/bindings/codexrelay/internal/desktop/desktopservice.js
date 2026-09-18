@@ -22,8 +22,8 @@ import * as $models from "./models.js";
 
 /**
  * ActivateProfile 启用指定 Profile。第二个参数控制是否同步外部客户端；
- * 第三个参数只由用户确认接管的弹窗传 true。普通切换即使磁盘状态在检查后
- * 发生变化，也只能走已接管更新，不能降级为隐式覆盖。
+ * 第三个参数只由用户确认接管的弹窗传 true。同步配置会覆盖之前的外部修改，
+ * 并保留官方快照；跳过配置时不会写入外部文件。
  * 外部文件提交成功后才保存 ActiveProfiles；保存失败会恢复外部文件。
  * @param {string} id
  * @param {boolean[]} configure
@@ -31,6 +31,17 @@ import * as $models from "./models.js";
  */
 export function ActivateProfile(id, ...configure) {
     return $Call.ByID(115523217, id, configure);
+}
+
+/**
+ * @param {string} source
+ * @param {string} previewToken
+ * @returns {$CancellablePromise<clientconfig$0.CodexHistoryRepairResult>}
+ */
+export function ApplyCodexHistoryRepair(source, previewToken) {
+    return $Call.ByID(788910031, source, previewToken).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
 }
 
 /**
@@ -48,7 +59,7 @@ export function BindDoge(accessToken) {
  */
 export function CheckClientConfig(category) {
     return $Call.ByID(3420125402, category).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType0($result);
+        return $$createType1($result);
     }));
 }
 
@@ -58,7 +69,7 @@ export function CheckClientConfig(category) {
  */
 export function CheckForUpdate() {
     return $Call.ByID(3131002871).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType2($result);
     }));
 }
 
@@ -162,7 +173,16 @@ export function EnableDogeToken(id) {
  */
 export function FetchProfileModels(input) {
     return $Call.ByID(1085814066, input).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType3($result);
+        return $$createType4($result);
+    }));
+}
+
+/**
+ * @returns {$CancellablePromise<$models.CodexDiagnostics>}
+ */
+export function GetCodexDiagnostics() {
+    return $Call.ByID(4075740198).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType5($result);
     }));
 }
 
@@ -172,7 +192,7 @@ export function FetchProfileModels(input) {
  */
 export function GetDogeBillingAnalysis(input) {
     return $Call.ByID(2483033099, input).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType4($result);
+        return $$createType6($result);
     }));
 }
 
@@ -182,7 +202,7 @@ export function GetDogeBillingAnalysis(input) {
  */
 export function GetDogeUsageLogs(input) {
     return $Call.ByID(813505150, input).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType5($result);
+        return $$createType7($result);
     }));
 }
 
@@ -191,7 +211,7 @@ export function GetDogeUsageLogs(input) {
  */
 export function GetState() {
     return $Call.ByID(3062805628).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType6($result);
+        return $$createType8($result);
     }));
 }
 
@@ -241,6 +261,16 @@ export function OpenExternalURL(raw) {
 }
 
 /**
+ * @param {string} source
+ * @returns {$CancellablePromise<clientconfig$0.CodexHistoryRepairResult>}
+ */
+export function PreviewCodexHistoryRepair(source) {
+    return $Call.ByID(4224592851, source).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
+}
+
+/**
  * RedeemDoge 使用当前绑定令牌兑换额度；兑换成功后重新同步用户、套餐和购买配置。
  * 兑换码只存在于本次请求体和上游调用栈，不写入配置、日志或返回状态。
  * @param {string} code
@@ -285,6 +315,16 @@ export function ReorderProfiles(ids) {
  */
 export function RestartUpdate() {
     return $Call.ByID(294208145);
+}
+
+/**
+ * @param {string} backupID
+ * @returns {$CancellablePromise<clientconfig$0.CodexHistoryRepairResult>}
+ */
+export function RestoreCodexHistoryRepair(backupID) {
+    return $Call.ByID(1196325193, backupID).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType0($result);
+    }));
 }
 
 /**
@@ -493,7 +533,7 @@ export function SyncDogeAnnouncements() {
  */
 export function TestProfile(id) {
     return $Call.ByID(2130459618, id).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType7($result);
+        return $$createType9($result);
     }));
 }
 
@@ -516,11 +556,13 @@ export function UnbindDoge() {
 }
 
 // Private type creation functions
-const $$createType0 = clientconfig$0.PublicClientConfig.createFrom;
-const $$createType1 = $models.UpdateInfo.createFrom;
-const $$createType2 = $models.PublicModel.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $models.DogeBillingAnalysis.createFrom;
-const $$createType5 = $models.DogeUsageLogPage.createFrom;
-const $$createType6 = $models.DesktopState.createFrom;
-const $$createType7 = $models.TestResult.createFrom;
+const $$createType0 = clientconfig$0.CodexHistoryRepairResult.createFrom;
+const $$createType1 = clientconfig$0.PublicClientConfig.createFrom;
+const $$createType2 = $models.UpdateInfo.createFrom;
+const $$createType3 = $models.PublicModel.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $models.CodexDiagnostics.createFrom;
+const $$createType6 = $models.DogeBillingAnalysis.createFrom;
+const $$createType7 = $models.DogeUsageLogPage.createFrom;
+const $$createType8 = $models.DesktopState.createFrom;
+const $$createType9 = $models.TestResult.createFrom;

@@ -426,7 +426,7 @@ func (s *DesktopService) ActivateProfile(id string, configure ...bool) error {
 
 // activateOfficial restores the client files captured before CodexRelay took
 // over this category, then removes the relay Profile mapping.
-func (s *DesktopService) activateOfficial(category string) error {
+func (s *DesktopService) activateOfficial(category string) (outcome error) {
 	category = strings.TrimSpace(category)
 	if !config.IsCategory(category) {
 		return errors.New("官方客户端类别无效")
@@ -436,6 +436,8 @@ func (s *DesktopService) activateOfficial(category string) error {
 	}
 	s.clientConfigMu.Lock()
 	defer s.clientConfigMu.Unlock()
+	finishDiagnostic := s.beginCodexSwitch(category)
+	defer func() { finishDiagnostic(outcome) }()
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("程序尚未初始化")
@@ -452,13 +454,24 @@ func (s *DesktopService) activateOfficial(category string) error {
 	var rollback func() error
 	if status.Status != "error" && status.ConfigState == clientconfig.ClientConfigStateOfficial {
 		// Another tool may already have restored native OAuth while an older
-		// Relay snapshot remains. Consume only the stale metadata in that case.
+		// Relay snapshot remains. Keep that login and normalize stale connections.
+		if category == config.CategoryCodex {
+			var err error
+			rollback, err = clientconfig.NormalizeCodexOfficialWithRollback(state.Config)
+			if err != nil {
+				return fmt.Errorf("整理 Codex 官方配置失败: %w", err)
+			}
+		}
 	} else if len(entry.OfficialBackups) > 0 {
 		files, err := clientconfig.ResolveOfficialConfigFiles(state.Config, category, s.runtime.DataDirectory())
 		if err != nil {
 			return fmt.Errorf("官方配置恢复信息无效: %w", err)
 		}
-		rollback, err = clientconfig.RestoreOfficialConfigWithRollback(files)
+		if category == config.CategoryCodex {
+			rollback, err = clientconfig.RestoreCodexOfficialConfigWithRollback(files)
+		} else {
+			rollback, err = clientconfig.RestoreOfficialConfigWithRollback(files)
+		}
 		if err != nil {
 			return fmt.Errorf("恢复 %s 官方配置失败: %w", category, err)
 		}
@@ -536,7 +549,7 @@ func (s *DesktopService) activateProfileFromTray(id string) error {
 	return s.activateProfile(id, writeIntent)
 }
 
-func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWriteIntent) error {
+func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWriteIntent) (outcome error) {
 	state := s.runtime.State()
 	if state == nil {
 		return errors.New("程序尚未初始化")
@@ -548,6 +561,8 @@ func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWrit
 	}
 	candidate := state.Config.Profiles[index]
 	category := candidate.Category
+	finishDiagnostic := s.beginCodexSwitch(category)
+	defer func() { finishDiagnostic(outcome) }()
 	previousID = state.Config.ActiveProfiles[category]
 	var configResult clientconfig.ConfigureResult
 	clientConfigRendered := false
@@ -587,6 +602,11 @@ func (s *DesktopService) activateProfile(id string, writeIntent clientConfigWrit
 				}
 				if !found {
 					return errors.New("二狗子令牌已不在最新目录中，请先同步")
+				}
+			}
+			if category == config.CategoryCodex && !clientConfigRendered {
+				if err := clientconfig.RequireCodexRelayConfiguration(*cfg); err != nil {
+					return err
 				}
 			}
 			if cfg.ActiveProfiles == nil {

@@ -41,6 +41,7 @@ func (r *Runtime) ProxyHandler() http.Handler {
 		}
 
 		started := time.Now()
+		active.LastRequestAt.Store(started.UnixMilli())
 		requestID := r.nextID.Add(1)
 		statusCode := http.StatusBadGateway
 		proxyError := ""

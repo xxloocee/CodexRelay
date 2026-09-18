@@ -8,6 +8,8 @@ require github.com/titanous/json5 v1.0.0
 
 require golang.org/x/mod v0.37.0
 
+require github.com/BurntSushi/toml v1.6.0
+
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect

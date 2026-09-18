@@ -8,6 +8,7 @@ export {
 };
 
 export {
+    CodexDiagnostics,
     DesktopState,
     DogeBillingAnalysis,
     DogeBillingOverviewItem,
