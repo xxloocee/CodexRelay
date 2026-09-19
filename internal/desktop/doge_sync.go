@@ -48,6 +48,7 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 	defer s.setDogeSyncing(true, false)
 	defer s.setDogeSyncPhase("")
 	s.dogeMu.Lock()
+	before := s.runtime.State()
 	directorySwitches, err := s.syncDogeLocked(ctx, accessToken, replaceToken, mode)
 	s.dogeMu.Unlock()
 	if err != nil {
@@ -55,6 +56,9 @@ func (s *DesktopService) syncDoge(ctx context.Context, accessToken string, repla
 	}
 	// 自动故障切换可能进入客户端配置事务并再次读取二狗子目录，必须在
 	// 释放 dogeMu 后执行，避免目录同步与 Profile 准备互相等待。
+	if before != nil {
+		s.resetRemovedDogeProfileHealth(before.Config.Profiles)
+	}
 	s.setDogeDirectorySwitchContexts(directorySwitches)
 	return nil
 }
@@ -106,6 +110,13 @@ func (s *DesktopService) syncDogeLocked(ctx context.Context, accessToken string,
 	}
 	if err := s.saveDogeData(data, announcements, baseURL, accessToken, previousOrder); err != nil {
 		return nil, err
+	}
+	current := s.runtime.State()
+	for category, pending := range directorySwitches {
+		if pending != nil && dogeTokenDirectoryContains(data.Tokens, pending.profile.RemoteTokenID) &&
+			config.FindProfileIndex(current.Config.Profiles, pending.profile.ID) < 0 {
+			delete(directorySwitches, category)
+		}
 	}
 	return directorySwitches, nil
 }
@@ -230,9 +241,48 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 	data.BaseURL = baseURL
 	data.TokenOrder = mergeDogeTokenOrder(previousOrder, data.Tokens)
 	data.Tokens = orderDogeTokens(data.TokenOrder, data.Tokens)
-	removedProfileIDs := make([]string, 0)
+	invalidated := make(map[string]struct{})
+	invalidatedCategories := make(map[string]struct{})
+	previousContexts := s.dogeDirectorySwitchContexts()
 	pendingNotificationEvents := make([]taskNotificationEvent, 0, 2)
 	err := s.updateConfig(func(cfg *config.AppConfig) error {
+		// A successful rebind must invalidate old profile IDs, including IDs
+		// held by an open deletion confirmation. Failed binds leave them intact.
+		if cfg.Doge.BaseURL != baseURL || cfg.Doge.AccessToken != accessToken {
+			for category, pending := range previousContexts {
+				invalidated[pending.profile.ID] = struct{}{}
+				invalidatedCategories[category] = struct{}{}
+			}
+			for _, profile := range cfg.Profiles {
+				if profile.Source == config.SourceDoge {
+					invalidated[profile.ID] = struct{}{}
+					if cfg.ActiveProfiles[profile.Category] == profile.ID {
+						invalidatedCategories[profile.Category] = struct{}{}
+					}
+				}
+			}
+			removeMissingDogeProfiles(cfg, nil)
+		}
+		// Legacy records may already contain IDs from another service. Do not
+		// silently retarget their identity when a full sync discovers a new key.
+		matchingTokens := make([]config.DogeToken, 0, len(data.Tokens))
+		for _, token := range data.Tokens {
+			matches := true
+			for _, profile := range cfg.Profiles {
+				if profile.Source == config.SourceDoge && profile.RemoteTokenID == token.ID &&
+					isCompleteDogeAPIKey(token.Key) && normalizeDogeAPIKey(profile.APIKey) != normalizeDogeAPIKey(token.Key) {
+					matches = false
+					invalidated[profile.ID] = struct{}{}
+					if cfg.ActiveProfiles[profile.Category] == profile.ID {
+						invalidatedCategories[profile.Category] = struct{}{}
+					}
+				}
+			}
+			if matches {
+				matchingTokens = append(matchingTokens, token)
+			}
+		}
+		removeMissingDogeProfiles(cfg, matchingTokens)
 		// 同步响应只覆盖远端目录字段；同步间隔由本地设置维护，必须从当前配置继承，避免后台同步把用户选择重置为默认值。
 		data.SyncIntervalMinutes = cfg.Doge.SyncIntervalMinutes
 		data.Notifications = mergeDogeAnnouncementState(cfg.Doge.Notifications, announcements)
@@ -273,20 +323,30 @@ func (s *DesktopService) saveDogeData(data config.DogeConnection, announcements 
 				break
 			}
 		}
-		removedProfileIDs = removeMissingDogeProfiles(cfg, data.Tokens)
 		cfg.Doge = data
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	for _, profileID := range removedProfileIDs {
-		s.runtime.ResetProfileHealth(profileID)
-	}
+	s.clearDogeProfileSwitchState(invalidated, invalidatedCategories)
 	for _, event := range pendingNotificationEvents {
 		s.enqueueTaskNotificationEvent(event.Type, event.Identity, event.Details)
 	}
 	return nil
+}
+
+// Call after releasing account/client locks: health callbacks can switch tokens.
+func (s *DesktopService) resetRemovedDogeProfileHealth(before []config.Profile) {
+	current := s.runtime.State()
+	if current == nil {
+		return
+	}
+	for _, profile := range before {
+		if profile.Source == config.SourceDoge && config.FindProfileIndex(current.Config.Profiles, profile.ID) < 0 {
+			s.runtime.ResetProfileHealth(profile.ID)
+		}
+	}
 }
 
 // removeMissingDogeProfiles 以本次成功同步的完整令牌目录清理本地二狗子 Profile。

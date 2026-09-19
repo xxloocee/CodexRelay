@@ -1,6 +1,7 @@
 import { SetClientAccessHost, SetDogeBaseURL, SetNetwork, SetProxyListenAllInterfaces, SetProxyPort } from "../../core/desktop-api.js";
 import { $ } from "../../core/dom.js";
 import { errorMessage, setButtonLoading, toast } from "../../core/feedback.js";
+import { showConfirmDialog } from "../../core/modal.js";
 import { drafts, serverState } from "../../core/store.js";
 
 export function createNetwork({ loadState }) {
@@ -116,12 +117,18 @@ export function createNetwork({ loadState }) {
       return;
     }
     const button = $("saveDogeBaseURL");
+    const previousURL = (serverState.snapshot?.doge?.baseUrl || "").replace(/\/+$/, "");
+    const hasAccountProfiles = serverState.snapshot?.profiles?.some((profile) => profile.source === "doge");
+    if (baseURL.replace(/\/+$/, "") !== previousURL && hasAccountProfiles) {
+      const confirmed = await showConfirmDialog("更换服务地址会移除当前账户密钥的本地配置并停止使用，需要同步后重新导入。远端密钥不会被删除。", { title: "更换服务地址", confirmLabel: "更换地址", danger: true });
+      if (!confirmed) return;
+    }
     setButtonLoading(button, true, "保存中...");
     try {
       await SetDogeBaseURL(baseURL);
       drafts.dogeBaseURLDirty = false;
       await loadState();
-      toast("二狗子 API 地址已更新；已绑定账户请手动刷新一次");
+      toast("二狗子 API 地址已保存；更换地址后请同步账户并重新导入密钥");
     } catch (error) {
       toast(errorMessage(error), true);
     } finally {

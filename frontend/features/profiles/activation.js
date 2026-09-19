@@ -4,6 +4,7 @@ import {
   SelectDirectory,
   SetDataDirectory,
 } from "../../core/desktop-api.js";
+import { GetCodexDiagnostics } from "../../core/codex-maintenance-api.js";
 import { $ } from "../../core/dom.js";
 import { errorMessage, setButtonLoading, toast } from "../../core/feedback.js";
 import { syncModalBody } from "../../core/modal.js";
@@ -50,6 +51,25 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     syncModalBody();
   }
 
+  async function showActivationResult(category, official = false) {
+    if (category !== "codex") {
+      toast(official ? `${clientCategoryLabel(category)} 已切换到官方配置` : `已切换到 ${clientCategoryLabel(category)} 类别`);
+      return;
+    }
+    if (!official && clientConfigFor(category)?.skipConfigReplacement) {
+      toast("已切换 Relay 上游；已开启跳过配置文件替换，Codex 配置未改写");
+      return;
+    }
+    try {
+      const diagnosis = await GetCodexDiagnostics();
+      toast(diagnosis.message, !diagnosis.config?.configured);
+    } catch {
+      // The switch has already committed. A diagnostics failure must not be
+      // presented as a failed switch or imply that it was rolled back.
+      toast("配置切换已完成，但无法读取切换后的诊断状态", true);
+    }
+  }
+
   async function performActivation(pending) {
     const button = pending?.button || null;
     setButtonLoading(button, true, "切换中...");
@@ -62,7 +82,7 @@ export function createProfileActivation({ loadState, categoryLabel }) {
         pending.takeoverClient === true,
       );
       await loadState();
-      toast(`已切换到 ${clientCategoryLabel(pending.category)} 类别`);
+      await showActivationResult(pending.category);
     } catch (error) {
       toast(errorMessage(error), true);
     } finally {
@@ -104,7 +124,7 @@ export function createProfileActivation({ loadState, categoryLabel }) {
     try {
       await ActivateProfile(`official:${category}`);
       await loadState();
-      toast(`${clientCategoryLabel(category)} 已切换到官方配置`);
+      await showActivationResult(category, true);
     } catch (error) {
       toast(errorMessage(error), true);
     } finally {

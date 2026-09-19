@@ -118,31 +118,13 @@ func configureCodexNativeWithAuth(cfg config.AppConfig, backupRoot string, saved
 			value = map[string]any{}
 		}
 		original, _ := readCodexTOML(snapshots[file].data)
-		store := stringField(value, "cli_auth_credentials_store")
-		if profile := codexActiveProfile(value); profile != nil {
-			if override := stringField(profile, "cli_auth_credentials_store"); override != "" {
-				store = override
-			}
-		}
+		store := codexCredentialStore(value)
 		if (!snapshots[file].existed || parseErr != nil || codexSelectedProvider(value) != "openai") && (savedStore == "keyring" || savedStore == "auto") {
 			store = savedStore
 		}
-		clearCodexActiveConnection(value)
-		// Remove only overrides of the built-in OpenAI provider.
-		if providers, ok := value["model_providers"].(map[string]any); ok {
-			delete(providers, "openai")
-		}
-		if profile := codexActiveProfile(value); profile != nil {
-			if providers, ok := profile["model_providers"].(map[string]any); ok {
-				delete(providers, "openai")
-			}
-		}
-		value["model_provider"] = "openai"
 		// The omitted store already defaults to file. Keep it omitted so an
 		// existing native login remains a byte-for-byte no-op.
-		if store == "file" || store == "keyring" || store == "auto" {
-			value["cli_auth_credentials_store"] = store
-		}
+		setCodexNativeConnection(value, store)
 		data, err := marshalCodexTOML(value)
 		if err != nil {
 			return nil, err

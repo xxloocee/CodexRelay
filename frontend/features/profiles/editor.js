@@ -296,14 +296,19 @@ export function createProfileEditor({ loadState, beginActivation, nonHomeProfile
 
   async function deleteProfile(id, button = null) {
     const profile = serverState.snapshot.profiles.find((item) => item.id === id);
-    if (!profile || !(await showConfirmDialog("确定删除“" + nonHomeProfileName(profile) + "”吗？", { title: "删除代理 API", danger: true }))) return;
+    if (!profile) return;
+    const accountKey = profile.source === "doge";
+    const message = accountKey
+      ? `确定从二狗子账户永久删除“${nonHomeProfileName(profile)}”吗？使用此密钥的其他客户端也将无法继续使用。删除成功后会同时移除本地配置，此操作无法撤销。`
+      : `确定删除本地代理 API“${nonHomeProfileName(profile)}”吗？不会删除供应商账户中的密钥。`;
+    if (!(await showConfirmDialog(message, { title: accountKey ? "删除账户密钥" : "删除本地代理 API", confirmLabel: accountKey ? "删除账户密钥" : "删除", danger: true }))) return;
     setButtonLoading(button, true, "删除中...");
     try {
       await DeleteProfile(id);
       drafts.dirty = false;
       await loadState();
       showView("profiles");
-      toast("代理 API 已删除");
+      toast(accountKey ? "账户密钥及本地配置已删除" : "本地代理 API 已删除");
     } catch (error) {
       toast(errorMessage(error), true);
     } finally {

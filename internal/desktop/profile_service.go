@@ -380,8 +380,40 @@ func (s *DesktopService) SetProfileAutoSwitch(id string, enabled bool) error {
 
 func (s *DesktopService) DeleteProfile(id string) error {
 	s.clientConfigMu.Lock()
-	defer s.clientConfigMu.Unlock()
-	return s.updateConfig(func(cfg *config.AppConfig) error {
+	before := s.runtime.State()
+	err := s.deleteProfileLocked(id)
+	s.clientConfigMu.Unlock()
+	if err != nil {
+		return err
+	}
+	// Health callbacks may trigger automatic switching and reacquire the
+	// client/account locks. Run them only after the deletion releases both.
+	after := s.runtime.State()
+	if before != nil && after != nil {
+		for _, profile := range before.Config.Profiles {
+			if config.FindProfileIndex(after.Config.Profiles, profile.ID) < 0 {
+				s.runtime.ResetProfileHealth(profile.ID)
+			}
+		}
+	}
+	s.notifyStateChanged()
+	return nil
+}
+
+func (s *DesktopService) deleteProfileLocked(id string) error {
+	id = strings.TrimSpace(id)
+	state := s.runtime.State()
+	if state == nil {
+		return errors.New("程序尚未初始化")
+	}
+	index := config.FindProfileIndex(state.Config.Profiles, id)
+	if index < 0 {
+		return errors.New("代理 API 不存在")
+	}
+	if state.Config.Profiles[index].Source == config.SourceDoge {
+		return s.deleteDogeProfile(id)
+	}
+	_, err := s.runtime.UpdateConfig(func(cfg *config.AppConfig) error {
 		index := config.FindProfileIndex(cfg.Profiles, id)
 		if index < 0 {
 			return errors.New("代理 API 不存在")
@@ -394,6 +426,7 @@ func (s *DesktopService) DeleteProfile(id string) error {
 		cfg.FailoverOrder = config.NormalizeFailoverOrder(cfg.FailoverOrder, cfg.Profiles)
 		return nil
 	})
+	return err
 }
 
 type clientConfigWriteIntent uint8

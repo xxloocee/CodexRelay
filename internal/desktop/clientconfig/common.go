@@ -138,6 +138,15 @@ func applyConfigTransactionPolicy(paths []string, render func(map[string]configF
 	if err != nil {
 		return result, err
 	}
+	// A Codex no-op is still a claim about both live files. Re-read them so
+	// concurrent edits cannot turn a no-op switch into false success.
+	if force && len(changes) == 0 {
+		for _, snapshot := range snapshots {
+			if err := ensureSnapshotUnchanged(snapshot); err != nil {
+				return result, err
+			}
+		}
+	}
 	uniqueChanges := make([]ConfigFileChange, 0, len(changes))
 	seen := make(map[string]bool, len(changes))
 	for _, change := range changes {
@@ -256,12 +265,9 @@ func applyConfigTransactionPolicy(paths []string, render func(map[string]configF
 	// external client can rewrite an earlier file while a later file is being
 	// committed, leaving a partially managed configuration reported as success.
 	for _, change := range uniqueChanges {
-		if force {
-			break
-		}
 		expected, changed := written[change.Path]
 		if !changed {
-			// A no-op file is still part of the non-Codex transaction. An
+			// A no-op file is still part of the transaction. An
 			// external writer may change it while another file is committed.
 			snapshot := byPath[change.Path]
 			expected = writtenConfigFile{data: snapshot.data, mode: snapshot.mode}

@@ -74,6 +74,20 @@ func (s *DesktopService) beginCodexSwitch(category string) func(error) {
 
 func (s *DesktopService) writeCodexDiagnostic(event, result string) {
 	d := s.GetCodexDiagnostics()
+	if event == "switch_finished" && result == "success" {
+		// A successful file operation is not evidence of a successful request.
+		// Use the same snapshot for the result code and its diagnosis.
+		switch {
+		case !d.Config.Configured:
+			result = "configuration_not_verified"
+		case d.Config.Mode == "official":
+			result = "official_configuration_written"
+		case d.RequestObserved:
+			result = "relay_configuration_written_request_observed"
+		default:
+			result = "relay_configuration_written_waiting_for_request"
+		}
+	}
 	entry := struct {
 		Time      string           `json:"time"`
 		Event     string           `json:"event"`

@@ -105,11 +105,16 @@ func renderCodexRelayTOML(source []byte, endpoint, model string) ([]byte, error)
 	}
 	clearCodexActiveConnection(value)
 	value["model_provider"] = codexRelayModelProviderID
+	// Desktop/native OpenAI requests do not necessarily select our custom
+	// provider. Route that API-key channel to the same local endpoint too.
+	// Native provider IDs are reserved; use the documented root override.
+	value["openai_base_url"] = endpoint
 	providers, _ := value["model_providers"].(map[string]any)
 	if providers == nil {
 		providers = map[string]any{}
 		value["model_providers"] = providers
 	}
+	delete(providers, "openai")
 	provider, _ := providers[codexRelayModelProviderID].(map[string]any)
 	if provider == nil {
 		provider = map[string]any{}
@@ -117,6 +122,8 @@ func renderCodexRelayTOML(source []byte, endpoint, model string) ([]byte, error)
 	for _, key := range codexConnectionKeys {
 		delete(provider, key)
 	}
+	// Command-backed auth is mutually exclusive with requires_openai_auth.
+	delete(provider, "auth")
 	for key, item := range codexRelayProvider(endpoint) {
 		if key == "name" && stringField(provider, "name") != "" {
 			continue
@@ -129,6 +136,7 @@ func renderCodexRelayTOML(source []byte, endpoint, model string) ([]byte, error)
 	if profile := codexActiveProfile(value); profile != nil {
 		if overrides, ok := profile["model_providers"].(map[string]any); ok {
 			delete(overrides, codexRelayModelProviderID)
+			delete(overrides, "openai")
 		}
 	}
 	// The key written to auth.json must win over an old keyring login.
@@ -140,6 +148,33 @@ func renderCodexRelayTOML(source []byte, endpoint, model string) ([]byte, error)
 		}
 	}
 	return marshalCodexTOML(value)
+}
+
+func codexCredentialStore(value map[string]any) string {
+	if profile := codexActiveProfile(value); profile != nil {
+		if store := stringField(profile, "cli_auth_credentials_store"); store != "" {
+			return store
+		}
+	}
+	return stringField(value, "cli_auth_credentials_store")
+}
+
+// Share the official channel normalization with diagnosis. Retained, unused
+// providers must not make a native OpenAI configuration look invalid.
+func setCodexNativeConnection(value map[string]any, store string) {
+	clearCodexActiveConnection(value)
+	if providers, ok := value["model_providers"].(map[string]any); ok {
+		delete(providers, "openai")
+	}
+	if profile := codexActiveProfile(value); profile != nil {
+		if providers, ok := profile["model_providers"].(map[string]any); ok {
+			delete(providers, "openai")
+		}
+	}
+	value["model_provider"] = "openai"
+	if store == "file" || store == "keyring" || store == "auto" {
+		value["cli_auth_credentials_store"] = store
+	}
 }
 
 func codexRelayConfigurationMatches(configData, authData []byte, endpoint, key, model string, _ bool) (bool, error) {

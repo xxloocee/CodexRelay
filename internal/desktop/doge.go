@@ -130,16 +130,21 @@ func (s *DesktopService) SetDogeSyncInterval(minutes int) error {
 	})
 }
 
-// SetDogeBaseURL 保存二狗子管理 API 的服务地址。仍跟随旧默认地址的二狗子
-// Profile 会一起切换；用户在编辑页改过地址的 Profile 不会被覆盖。
+// SetDogeBaseURL 保存服务地址并使旧服务的目录和导入配置失效。
+// 新服务同步后须重新导入，不能跨服务复用令牌 ID。
 func (s *DesktopService) SetDogeBaseURL(raw string) error {
 	baseURL, err := config.NormalizeDogeBaseURL(raw)
 	if err != nil {
 		return err
 	}
 	s.dogeMu.Lock()
-	defer s.dogeMu.Unlock()
 	state := s.runtime.State()
+	defer func() {
+		s.dogeMu.Unlock()
+		if state != nil {
+			s.resetRemovedDogeProfileHealth(state.Config.Profiles)
+		}
+	}()
 	if state == nil {
 		return errors.New("程序尚未初始化")
 	}
@@ -147,22 +152,36 @@ func (s *DesktopService) SetDogeBaseURL(raw string) error {
 	if previousBaseURL == baseURL {
 		return nil
 	}
-	return s.updateConfig(func(cfg *config.AppConfig) error {
-		oldBaseURL := strings.TrimRight(strings.TrimSpace(cfg.Doge.BaseURL), "/")
-		oldProfileURL := oldBaseURL + "/v1"
-		newProfileURL := baseURL + "/v1"
-		for index := range cfg.Profiles {
-			profile := &cfg.Profiles[index]
-			if profile.Source != config.SourceDoge {
-				continue
-			}
-			if strings.TrimRight(strings.TrimSpace(profile.BaseURL), "/") == oldProfileURL {
-				profile.BaseURL = newProfileURL
+	removed := make(map[string]struct{})
+	categories := make(map[string]struct{})
+	// Missing-token prompts can outlive the local profile itself.
+	for category, pending := range s.dogeDirectorySwitchContexts() {
+		removed[pending.profile.ID] = struct{}{}
+		categories[category] = struct{}{}
+	}
+	_, err = s.runtime.UpdateConfig(func(cfg *config.AppConfig) error {
+		// Remote IDs are scoped to one service. Never carry its directory or
+		// imported profile identities into another service, even before sync.
+		for _, profile := range cfg.Profiles {
+			if profile.Source == config.SourceDoge && cfg.ActiveProfiles[profile.Category] == profile.ID {
+				categories[profile.Category] = struct{}{}
 			}
 		}
+		for _, id := range removeMissingDogeProfiles(cfg, nil) {
+			removed[id] = struct{}{}
+		}
+		cfg.Doge.Tokens = nil
+		cfg.Doge.TokenOrder = nil
+		cfg.Doge.LastSyncAt = time.Time{}
 		cfg.Doge.BaseURL = baseURL
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	s.clearDogeProfileSwitchState(removed, categories)
+	s.notifyStateChanged()
+	return nil
 }
 
 // UnbindDoge 删除绑定凭据、账户快照和全部二狗子 Profile。
@@ -249,8 +268,11 @@ func (s *DesktopService) RedeemDoge(code string) error {
 		return errors.New("请先绑定二狗子访问令牌")
 	}
 	s.dogeMu.Lock()
-	defer s.dogeMu.Unlock()
 	current := s.runtime.State()
+	defer func() {
+		s.dogeMu.Unlock()
+		s.resetRemovedDogeProfileHealth(current.Config.Profiles)
+	}()
 	if !current.Config.Doge.Topup.EnableRedemption {
 		return errors.New("当前账户暂未开放兑换额度")
 	}
