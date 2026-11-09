@@ -22,7 +22,7 @@ import (
 	"codexrelay/internal/tasknotify"
 )
 
-var applicationVersion = "2.3.11"
+var applicationVersion = "2.3.12"
 
 const (
 	NotificationKindBalance      = "balance"

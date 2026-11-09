@@ -52,7 +52,6 @@ export const SaveProfile = (...args) => callDesktop("SaveProfile", ...args);
 export const SelectDirectory = (...args) => callDesktop("SelectDirectory", ...args);
 export const SetClientConfigPath = (...args) => callDesktop("SetClientConfigPath", ...args);
 export const SetClientConfigSkip = (...args) => callDesktop("SetClientConfigSkip", ...args);
-export const SetClientAccessHost = (...args) => callDesktop("SetClientAccessHost", ...args);
 export const SetDataDirectory = (...args) => callDesktop("SetDataDirectory", ...args);
 export const SetDogeAlertSettings = (...args) => callDesktop("SetDogeAlertSettings", ...args);
 export const SetDogeBaseURL = (...args) => callDesktop("SetDogeBaseURL", ...args);

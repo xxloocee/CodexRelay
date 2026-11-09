@@ -37,7 +37,6 @@ export const drafts = {
   networkModeDirty: false,
   networkProxyDirty: false,
 	networkPortDirty: false,
-	networkHostDirty: false,
   networkListenDirty: false,
   networkDraftRevision: 0,
   networkListenDraftRevision: 0,

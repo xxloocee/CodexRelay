@@ -13,7 +13,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -43,12 +42,6 @@ func Validate(cfg AppConfig) error {
 	}
 	if cfg.ClientConfigs == nil {
 		return errors.New("clientConfigs 必须是 JSON 对象")
-	}
-	if err := ValidateClientAccessHost(cfg.ClientAccessHost); err != nil {
-		return err
-	}
-	if !cfg.ListenOnAllInterfaces && !IsLoopbackClientAccessHost(cfg.ClientAccessHost) {
-		return errors.New("仅监听本机时，客户端访问主机必须是 127.0.0.1 或 localhost")
 	}
 	if err := network.Validate(cfg.Network, cfg.ProxyPort); err != nil {
 		return err
@@ -96,56 +89,6 @@ func Validate(cfg AppConfig) error {
 		return err
 	}
 	return nil
-}
-
-// NormalizeClientAccessHost 规范写入外部客户端的主机名。该字段不包含协议、
-// 端口和路径，端口与类别路径始终由 CodexRelay 当前配置生成。
-func NormalizeClientAccessHost(raw string) (string, error) {
-	host := strings.TrimSpace(raw)
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	if err := ValidateClientAccessHost(host); err != nil {
-		return "", err
-	}
-	return host, nil
-}
-
-func ValidateClientAccessHost(raw string) error {
-	host := strings.TrimSpace(raw)
-	if host == "" {
-		return errors.New("客户端访问主机不能为空")
-	}
-	if host != raw || len(host) > 253 || strings.ContainsAny(host, "\x00\r\n/\\?#@[]") {
-		return errors.New("客户端访问主机格式无效")
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		if ip.To4() == nil {
-			return errors.New("客户端访问主机必须是 IPv4 地址或主机名")
-		}
-		return nil
-	}
-	for _, label := range strings.Split(host, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return errors.New("客户端访问主机格式无效")
-		}
-		for _, r := range label {
-			if !(r == '-' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
-				return errors.New("客户端访问主机格式无效")
-			}
-		}
-	}
-	return nil
-}
-
-// IsLoopbackClientAccessHost reports whether an access host is reachable while
-// the proxy only listens on the local loopback interface.
-func IsLoopbackClientAccessHost(raw string) bool {
-	host := strings.TrimSpace(raw)
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	return host == "127.0.0.1"
 }
 
 // ValidateTokenSwitch 校验通用故障切换模式、触发阈值和时间窗口。

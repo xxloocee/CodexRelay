@@ -97,13 +97,11 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 	if state.Config.ListenOnAllInterfaces == enabled {
 		return nil
 	}
-	if !enabled && !config.IsLoopbackClientAccessHost(state.Config.ClientAccessHost) {
-		return errors.New("当前客户端访问主机不是回环地址，请先改回回环地址后再关闭允许 WSL2 访问")
-	}
 	oldServer, server, listener, err := s.rebindProxyListenScope(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces, enabled)
 	if err != nil {
 		return err
 	}
+	defer shutdownProxyServerAsync(oldServer)
 	if err := s.updateConfig(func(cfg *config.AppConfig) error {
 		cfg.ListenOnAllInterfaces = enabled
 		return nil
@@ -112,18 +110,15 @@ func (s *DesktopService) SetProxyListenAllInterfaces(enabled bool) error {
 		if restoreErr := s.restoreProxyListener(state.Config.ProxyPort, state.Config.ListenOnAllInterfaces); restoreErr != nil {
 			return fmt.Errorf("%v；恢复原监听失败: %w", err, restoreErr)
 		}
-		shutdownProxyServerAsync(oldServer)
 		return err
 	}
 	s.attachProxyListener(server, listener)
-	shutdownProxyServerAsync(oldServer)
 	return nil
 }
 
 // syncManagedClientConfigs updates only clients already owned by CodexRelay.
-// It uses the prospective network settings while
-// preserving the current settings for the status check, so changing a port or
-// listen scope cannot silently take over an unrelated client configuration.
+// It uses the prospective port while preserving the current settings for the
+// status check, so changing a port cannot take over an unrelated client configuration.
 type managedClientConfigResult struct {
 	Category string
 	Result   clientconfig.ConfigureResult
@@ -179,43 +174,6 @@ func managedClientConfigRollbackError(original error, results []managedClientCon
 		return fmt.Errorf("%v；此前客户端配置回退失败: %w", original, rollbackErr)
 	}
 	return original
-}
-
-// SetClientAccessHost 更新写入外部客户端的访问主机。监听端口和类别路径由
-// config.json 的其他字段生成；已接管客户端在本地保存成功前统一同步并可回退。
-func (s *DesktopService) SetClientAccessHost(raw string) error {
-	host, err := config.NormalizeClientAccessHost(raw)
-	if err != nil {
-		return err
-	}
-	s.clientConfigMu.Lock()
-	defer s.clientConfigMu.Unlock()
-	state := s.runtime.State()
-	if state == nil {
-		return errors.New("程序尚未初始化")
-	}
-	if state.Config.ClientAccessHost == host {
-		return nil
-	}
-	if !state.Config.ListenOnAllInterfaces && !config.IsLoopbackClientAccessHost(host) {
-		return errors.New("代理仅监听本机时，客户端访问主机必须是回环地址；如需使用局域网地址，请先开启允许 WSL2 访问")
-	}
-	next := state.Config
-	next.ClientAccessHost = host
-	results, err := syncManagedClientConfigs(state.Config, next, s.runtime.DataDirectory())
-	if err != nil {
-		return err
-	}
-	if err := s.updateConfig(func(cfg *config.AppConfig) error {
-		cfg.ClientAccessHost = host
-		for _, item := range results {
-			rememberOfficialConfig(cfg, item.Category, item.Result)
-		}
-		return nil
-	}); err != nil {
-		return managedClientConfigRollbackError(fmt.Errorf("保存客户端访问主机失败: %w", err), results)
-	}
-	return nil
 }
 
 func rollbackClientConfigs(results []clientconfig.ConfigureResult) error {

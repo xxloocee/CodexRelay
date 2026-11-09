@@ -87,16 +87,20 @@ func (s *DesktopService) rebindProxyListenScope(port int, previous, next bool) (
 	s.server = nil
 	s.listener = nil
 	s.mu.Unlock()
+	if oldServer != nil {
+		oldServer.SetKeepAlivesEnabled(false)
+	}
 	if oldListener != nil {
 		_ = oldListener.Close()
 	}
 
 	listener, server, err := s.prepareProxyListener(port, next)
 	if err != nil {
-		if restoreErr := s.restoreProxyListener(port, previous); restoreErr != nil {
+		restoreErr := s.restoreProxyListener(port, previous)
+		shutdownProxyServerAsync(oldServer)
+		if restoreErr != nil {
 			return oldServer, nil, nil, fmt.Errorf("%v；恢复原监听失败: %w", err, restoreErr)
 		}
-		shutdownProxyServerAsync(oldServer)
 		return oldServer, nil, nil, err
 	}
 	return oldServer, server, listener, nil
@@ -123,6 +127,7 @@ func shutdownProxyServerAsync(server *http.Server) {
 	if server == nil {
 		return
 	}
+	server.SetKeepAlivesEnabled(false)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

@@ -347,16 +347,6 @@ export function SelectDirectory(initialDirectory) {
 }
 
 /**
- * SetClientAccessHost 更新写入外部客户端的访问主机。监听端口和类别路径由
- * config.json 的其他字段生成；已接管客户端在本地保存成功前统一同步并可回退。
- * @param {string} raw
- * @returns {$CancellablePromise<void>}
- */
-export function SetClientAccessHost(raw) {
-    return $Call.ByID(1540877308, raw);
-}
-
-/**
  * SetClientConfigPath 保存外部客户端配置目录，并立即返回新的本地检测状态。
  * @param {string} category
  * @param {string} directory

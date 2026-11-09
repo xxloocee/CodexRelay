@@ -189,7 +189,6 @@ func (r *Runtime) UpdateConfig(mutator func(*config.AppConfig) error) (config.Ap
 			old.APIKey == active.APIKey && old.Target.String() == active.Target.String() &&
 			reflect.DeepEqual(old.Profile.Headers, active.Profile.Headers) &&
 			current.Config.LocalAccessToken == next.LocalAccessToken && current.Config.ProxyPort == next.ProxyPort &&
-			current.Config.ClientAccessHost == next.ClientAccessHost &&
 			current.Config.ClientConfigs[category].ConfigDir == next.ClientConfigs[category].ConfigDir {
 			active.RequestObservation = old.RequestObservation
 		}

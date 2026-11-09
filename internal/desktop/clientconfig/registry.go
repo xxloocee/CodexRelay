@@ -549,12 +549,8 @@ func clientConfigDetected(definition clientDefinition, directory, file string) b
 }
 
 func clientProxyURL(cfg config.AppConfig, category string) string {
-	port := config.DefaultProxyPort
+	port := cfg.ProxyPort
 	host := "127.0.0.1"
-	port = cfg.ProxyPort
-	if configuredHost := strings.TrimSpace(cfg.ClientAccessHost); configuredHost != "" {
-		host = configuredHost
-	}
 	if port <= 0 {
 		port = config.DefaultProxyPort
 	}

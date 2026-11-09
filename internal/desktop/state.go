@@ -101,7 +101,7 @@ func (s *DesktopService) GetState() DesktopState {
 		dogeState.LastSyncAt = state.Config.Doge.LastSyncAt.Format(time.RFC3339)
 	}
 	return DesktopState{
-		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ClientBackupDirectory: filepath.Join(s.runtime.DataDirectory(), "client-backups"), ProxyPort: state.Config.ProxyPort, ListenOnAllInterfaces: state.Config.ListenOnAllInterfaces, ClientAccessHost: state.Config.ClientAccessHost,
+		Version: applicationVersion, UpdateSupported: updatesSupported(), NeedsOnboarding: s.onboardingStatus(), DataDirectory: s.runtime.DataDirectory(), ClientBackupDirectory: filepath.Join(s.runtime.DataDirectory(), "client-backups"), ProxyPort: state.Config.ProxyPort, ListenOnAllInterfaces: state.Config.ListenOnAllInterfaces,
 		ProxyURL: proxyURLs[config.CategoryCodex], ProxyURLs: proxyURLs,
 		LocalAccessToken: state.Config.LocalAccessToken, ActiveProfiles: state.Config.ActiveProfiles,
 		Profiles: profiles, FailoverOrder: config.NormalizeFailoverOrder(state.Config.FailoverOrder, state.Config.Profiles), ClientConfigs: publicClientConfigs(state.Config), Network: state.Config.Network, SystemProxy: state.SystemProxy,

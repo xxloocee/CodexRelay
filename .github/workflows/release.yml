@@ -150,6 +150,9 @@ jobs:
     needs: [windows, macos, linux]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
       - name: Download all packages
         uses: actions/download-artifact@v4
         with:
@@ -170,4 +173,4 @@ jobs:
           gh release create "$RELEASE_TAG" release-assets/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "CodexRelay $RELEASE_TAG" \
-            --generate-notes
+            --notes-file "docs/releases/$RELEASE_TAG.md"

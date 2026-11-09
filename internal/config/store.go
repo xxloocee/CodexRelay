@@ -119,15 +119,6 @@ func (s *Store) LoadOrCreate(proxyPort int) (AppConfig, error) {
 		cfg.ClientConfigs = map[string]ClientConfig{}
 	}
 	clientConfigMigrated := false
-	if strings.TrimSpace(cfg.ClientAccessHost) == "" {
-		cfg.ClientAccessHost = "127.0.0.1"
-		clientConfigMigrated = true
-	}
-	if ValidateClientAccessHost(cfg.ClientAccessHost) != nil ||
-		(!cfg.ListenOnAllInterfaces && !IsLoopbackClientAccessHost(cfg.ClientAccessHost)) {
-		cfg.ClientAccessHost = "127.0.0.1"
-		clientConfigMigrated = true
-	}
 	// Normalize configured client targets before validation. The adapter owns the
 	// filename, while the user-configurable portion is the absolute directory.
 	for category, client := range cfg.ClientConfigs {

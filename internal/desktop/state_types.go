@@ -16,7 +16,6 @@ type DesktopState struct {
 	ProxyPort             int    `json:"proxyPort"`
 	// ListenOnAllInterfaces 是网络设置页展示的监听范围，不代表当前出站网络出口。
 	ListenOnAllInterfaces bool                       `json:"listenOnAllInterfaces"`
-	ClientAccessHost      string                     `json:"clientAccessHost"`
 	ProxyURL              string                     `json:"proxyUrl"`
 	ProxyURLs             map[string]string          `json:"proxyUrls"`
 	LocalAccessToken      string                     `json:"localAccessToken"`

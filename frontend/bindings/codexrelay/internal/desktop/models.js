@@ -159,13 +159,6 @@ export class DesktopState {
              */
             this["listenOnAllInterfaces"] = false;
         }
-        if (!("clientAccessHost" in $$source)) {
-            /**
-             * @member
-             * @type {string}
-             */
-            this["clientAccessHost"] = "";
-        }
         if (!("proxyUrl" in $$source)) {
             /**
              * @member
